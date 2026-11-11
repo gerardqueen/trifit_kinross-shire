@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRI FIT Kinross-shire | Strength, Movement, Conditioning</title>
+<meta name="description" content="Friendly, community driven functional fitness gym in Kinross. Coached strength, movement, conditioning and HYROX classes, 1:1 and small group personal training.">
+<meta name="theme-color" content="#0c0c0d">
+<meta property="og:title" content="TRI FIT Kinross-shire">
+<meta property="og:description" content="Coached strength, movement, conditioning and HYROX classes in Kinross.">
+<link rel="icon" href="img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="head" id="top">
+  <div class="wrap head-in">
+    <a class="brand" href="#top" aria-label="TRI FIT Kinross-shire, home"><img src="img/logo.png" alt="" width="46" height="46"><span>TRI FIT<small>Kinross-shire</small></span></a>
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav class="nav" id="nav" aria-label="Sections">
+      <a href="#schedule">Schedule</a><a href="#coaches">Coaches</a><a href="#membership">Membership</a><a href="#programming">Programming</a><a href="#enquire">Enquire</a>
+      <a class="btn sm" data-teamup href="https://goteamup.com/p/4996174-tri-fit-kinross-shire/" target="_blank" rel="noopener">Book a class</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap hero-in">
+      <div class="hero-copy">
+        <p class="eyebrow" data-s="hero_eyebrow">Functional fitness in Kinross</p>
+        <h1 data-s="hero_headline">Strength. Movement. Conditioning.</h1>
+        <p class="lead" data-s="hero_text">A friendly, community driven gym with coached classes for every level.</p>
+        <div class="cta"><a class="btn" href="#enquire">Enquire about joining</a><a class="btn ghost" href="#schedule">See the timetable</a></div>
+        <ul class="facts" id="facts" aria-label="At a glance"></ul>
+      </div>
+      <div class="hero-art" id="hero-art"><img src="img/logo.png" alt="TRI FIT logo: a triangle with Conditioning, Strength and Movement on its sides" width="360" height="357"></div>
+    </div>
+  </section>
+
+  <section class="band" id="schedule">
+    <div class="wrap">
+      <div class="sec-head"><div><p class="eyebrow">Timetable</p><h2>Class schedule</h2></div>
+        <a class="btn ghost sm" data-teamup href="https://goteamup.com/p/4996174-tri-fit-kinross-shire/" target="_blank" rel="noopener">Book on TeamUp</a></div>
+      <div class="daytabs" id="daytabs" role="group" aria-label="Choose a day"></div>
+      <div class="week" id="week" aria-live="polite"></div>
+      <p class="note" data-s="schedule_note"></p>
+    </div>
+  </section>
+
+  <section class="band alt" id="coaches">
+    <div class="wrap">
+      <div class="sec-head"><div><p class="eyebrow">The team</p><h2>Meet the coaches</h2></div></div>
+      <div class="coaches" id="coach-grid"></div>
+    </div>
+  </section>
+
+  <section class="band" id="membership">
+    <div class="wrap">
+      <div class="sec-head"><div><p class="eyebrow">Pricing</p><h2>Membership options</h2></div></div>
+      <div class="plans" id="plans"></div>
+      <p class="note" data-s="membership_note"></p>
+    </div>
+  </section>
+
+  <section class="band chalk" id="programming">
+    <div class="wrap">
+      <div class="prog-top"><div><p class="eyebrow">Programming</p><h2 data-s="programming_heading">Three sides, one plan</h2></div>
+        <p class="lead" data-s="programming_intro"></p></div>
+      <div class="pillars" id="pillars"></div>
+      <div class="prog-two">
+        <div><h3>How the week runs</h3><ol class="rhythm" id="rhythm"></ol></div>
+        <div><h3>Why we do it this way</h3><div class="principles" id="principles"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="enquire">
+    <div class="wrap enq">
+      <div class="enq-copy">
+        <p class="eyebrow">Get started</p><h2>Send us an enquiry</h2>
+        <p class="lead">Tell us a bit about you and what you are looking for. A coach will get back to you.</p>
+        <dl class="contact" id="contact"></dl>
+        <div class="socials" id="socials"></div>
+      </div>
+      <form class="panel" id="enq-form" novalidate>
+        <div class="two">
+          <div class="field"><label for="e-name">Your name</label><input id="e-name" name="name" autocomplete="name" required maxlength="200"></div>
+          <div class="field"><label for="e-phone">Phone <span class="opt">optional</span></label><input id="e-phone" name="phone" type="tel" autocomplete="tel" maxlength="40"></div>
+        </div>
+        <div class="field"><label for="e-email">Email</label><input id="e-email" name="email" type="email" autocomplete="email" required maxlength="320"></div>
+        <div class="field"><label for="e-interest">I'm interested in</label><select id="e-interest" name="interest"></select></div>
+        <div class="field"><label for="e-message">Message <span class="opt">optional</span></label><textarea id="e-message" name="message" rows="4" maxlength="4000" placeholder="Training background, injuries, the times that suit you"></textarea></div>
+        <div class="hp" aria-hidden="true"><label for="e-company">Company</label><input id="e-company" name="company" tabindex="-1" autocomplete="off"></div>
+        <button class="btn" type="submit" id="e-submit">Send enquiry</button>
+        <p class="hint">We only use your details to reply to you. <a href="privacy.html">Privacy</a></p>
+        <p class="error" id="e-error" hidden role="alert"></p>
+        <div class="success" id="e-ok" hidden role="status"></div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <a class="brand" href="#top"><img src="img/logo.png" alt="" width="40" height="40"><span>TRI FIT<small>Kinross-shire</small></span></a>
+    <p class="foot-links"><a data-s-href="instagram" href="#" target="_blank" rel="noopener">Instagram</a><a data-s-href="facebook" href="#" target="_blank" rel="noopener">Facebook</a><a data-teamup href="#" target="_blank" rel="noopener">TeamUp</a><a href="privacy.html">Privacy</a><a href="admin.html">Staff login</a></p>
+  </div>
+</footer>
+<script type="module" src="js/site.js"></script>
+</body>
+</html>

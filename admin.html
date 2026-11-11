@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TRI FIT admin</title>
+<link rel="icon" href="img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="head">
+  <div class="wrap head-in">
+    <a class="brand" href="./"><img src="img/logo.png" alt="" width="46" height="46"><span>TRI FIT<small>Website admin</small></span></a>
+    <nav class="nav open" style="display:flex;position:static;flex-direction:row;padding:0;border:0;gap:16px;background:none">
+      <a href="./" target="_blank" rel="noopener" style="padding:0;border:0;font-size:16px">View website</a>
+      <button class="btn ghost sm" type="button" id="signout" hidden>Sign out</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap admin">
+  <!-- Sign in / create account / forgot password -->
+  <div id="login-view" hidden>
+    <form class="panel login" id="login-form" novalidate>
+      <h2 id="l-title">Admin login</h2>
+      <div class="field"><label for="l-email">Email</label><input id="l-email" type="email" autocomplete="username" required></div>
+      <div class="field" id="l-pass-field">
+        <label for="l-pass">Password</label><input id="l-pass" type="password" autocomplete="current-password" required minlength="8">
+        <button type="button" class="linkish" id="l-forgot" style="justify-self:end">Forgot password?</button>
+      </div>
+      <p class="hint" id="l-hint" hidden>At least 8 characters. You will get an email to confirm the address.</p>
+      <button class="btn" type="submit" id="l-submit">Sign in</button>
+      <button type="button" class="linkish" id="l-toggle">New admin? Create an account</button>
+      <p class="error" id="l-error" hidden role="alert"></p>
+      <p class="success" id="l-ok" hidden role="status"></p>
+    </form>
+  </div>
+
+  <!-- Set a new password (arrived from a reset email) -->
+  <div id="reset-view" hidden>
+    <form class="panel login" id="reset-form" novalidate>
+      <h2>Set a new password</h2>
+      <p class="hint">Signed in as <strong id="r-email"></strong>. Choose a new password for your admin account.</p>
+      <div class="field"><label for="r-pass">New password</label><input id="r-pass" type="password" autocomplete="new-password" minlength="8" required></div>
+      <div class="field"><label for="r-pass2">Confirm new password</label><input id="r-pass2" type="password" autocomplete="new-password" minlength="8" required></div>
+      <p class="hint">At least 8 characters.</p>
+      <button class="btn" type="submit" id="r-submit">Save new password</button>
+      <p class="error" id="r-error" hidden role="alert"></p>
+    </form>
+  </div>
+
+  <!-- Signed in but not on the admin list yet -->
+  <div id="pending-view" hidden>
+    <div class="panel login">
+      <h2>Waiting for approval</h2>
+      <p>You are signed in as <strong id="p-email"></strong>, but this account is not an admin yet. An existing admin can approve you from the Admins tab.</p>
+      <button class="btn ghost" type="button" id="p-signout">Sign out</button>
+    </div>
+  </div>
+
+  <!-- The admin area -->
+  <div id="app-view" hidden>
+    <p class="banner" id="demo-banner" hidden>Demo mode. Changes are saved in this browser only, so you can try everything safely.</p>
+    <p class="success" id="flash" hidden role="status" style="margin-bottom:14px"></p>
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
+      <h2>Website content</h2><span class="who" id="who"></span>
+    </div>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <div id="pane"></div>
+  </div>
+</main>
+<script type="module" src="js/admin.js"></script>
+</body>
+</html>

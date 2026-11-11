@@ -1,0 +1,23 @@
+# Backup for enquiry emails: once a day, asks the tf-enquiry-alert function to send any
+# enquiry that hasn't been emailed yet (e.g. if the visitor's browser closed mid-send).
+# The call also keeps the free Supabase project awake.
+# Can also be run by hand: Actions → "Retry enquiry alerts" → Run workflow.
+name: Retry enquiry alerts
+
+on:
+  schedule:
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send any unsent alerts
+        run: |
+          URL=$(grep -oP "SUPABASE_URL = '\K[^']+" js/config.js)
+          KEY=$(grep -oP "SUPABASE_ANON_KEY = '\K[^']+" js/config.js)
+          curl -sS -X POST "$URL/functions/v1/tf-enquiry-alert" -H "Content-Type: application/json" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -d '{}' || true
+          echo
