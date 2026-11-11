@@ -158,7 +158,7 @@ textarea{resize:vertical;line-height:1.5}
 .prose ul{list-style:disc;padding-left:20px}
 
 /* ---------- admin ---------- */
-.admin{padding:28px 0 64px}
+.admin{padding-block:28px 64px}
 .login{max-width:440px;margin:40px auto}
 .login h2,.admin h2{font:400 26px/1.15 var(--display)}
 .linkish{background:none;border:0;padding:0;color:var(--mute);text-decoration:underline;font-size:15px}
@@ -226,3 +226,54 @@ textarea{resize:vertical;line-height:1.5}
   .rw .acts{width:100%;justify-content:flex-end}
 }
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* ---------- members portal (app.html) ---------- */
+.weeknav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.weeknav b{font:600 17px/1 var(--cond);letter-spacing:1.2px;text-transform:uppercase;min-width:150px;text-align:center}
+.daystrip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:22px}
+.daystrip button{border:1px solid var(--line);background:transparent;border-radius:10px;padding:9px 2px 7px;display:grid;gap:3px;justify-items:center;color:var(--mute)}
+.daystrip b{font:600 13px/1 var(--cond);letter-spacing:1.2px;text-transform:uppercase}
+.daystrip span{font:400 19px/1 var(--display);color:var(--text)}
+.daystrip em{width:5px;height:5px;border-radius:50%;display:block}
+.daystrip .has em{background:var(--gold)}
+.daystrip button[aria-pressed="true"]{background:var(--chalk);border-color:var(--chalk);color:#000}
+.daystrip button[aria-pressed="true"] span{color:#000}
+.daystrip button[aria-pressed="true"].has em{background:#000}
+.dayhead{font:600 16px/1 var(--cond);letter-spacing:1.8px;text-transform:uppercase;color:var(--mute);margin-bottom:12px}
+.wgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));gap:16px;align-items:start}
+.wk{gap:12px}
+.wtitle{font:400 25px/1.15 var(--display)}
+.wbody{font-size:17px;line-height:1.9}
+.wbody.preview{background:#0b0b0c;border:1px dashed #45454a;border-radius:9px;padding:10px 12px;min-height:44px}
+.tok{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap;background:#000;border:1px solid #45454a;border-radius:7px;padding:0 8px;line-height:1.5}
+.tok b{font:700 18px/1.4 var(--cond);letter-spacing:.4px;color:var(--chalk);font-variant-numeric:tabular-nums}
+.tok i{font-style:normal;font-size:12.5px;color:var(--mute)}
+.tok.miss{color:var(--gold);font-size:14px}
+.coachnote{padding:10px 12px;border-left:3px solid var(--chalk);background:#0b0b0c;border-radius:0 8px 8px 0;font-size:15px;color:#d0cfca}
+.tag.out{background:transparent;color:var(--mute);border:1px solid #55555a}
+.scorebox{border-top:1px solid var(--line);padding-top:14px;display:grid;gap:14px}
+.myscore{font:400 30px/1.1 var(--display)}
+.myscore small{font:500 14px/1.3 var(--body);color:var(--mute)}
+.scoreform{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+.scoreform .field{width:120px}
+.scoreform .field input,.scoreform .field select{padding:9px 10px}
+.lb{display:grid;gap:6px}
+.lbrow{display:grid;grid-template-columns:28px minmax(0,1fr) auto auto;gap:10px;align-items:center;background:#0b0b0c;border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+.lbrow.you{border-color:var(--chalk)}
+.lbrow .rk{font:400 16px/1 var(--display);color:var(--mute);text-align:center}
+.lbrow:nth-of-type(-n+3) .rk{color:var(--gold)}
+.lbrow .nm b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbrow .nm small{font:600 11.5px/1 var(--cond);letter-spacing:1.2px;text-transform:uppercase;color:var(--mute)}
+.lbrow .sc{font:700 20px/1 var(--cond);font-variant-numeric:tabular-nums}
+.five{border:1px solid var(--line);background:transparent;border-radius:999px;padding:6px 10px;font:700 14px/1 var(--cond);min-width:58px}
+.five[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#000}
+.five[disabled]{opacity:.6;cursor:default}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:5px 10px;font:500 13px/1 ui-monospace,Menlo,Consolas,monospace;color:var(--mute)}
+.chip:hover{border-color:var(--chalk);color:var(--text)}
+.pbin{width:110px !important;text-align:right;font:700 18px/1.2 var(--cond) !important;font-variant-numeric:tabular-nums}
+.person .acts{flex-wrap:wrap;align-items:center;justify-content:flex-end}
+.person select{width:auto !important;padding:7px 10px !important;font-size:15px !important}
+.check.sm{font-size:14px;gap:6px}
+.check.sm input{width:16px;height:16px}
+@media (max-width:520px){.scoreform .field{width:calc(50% - 6px)}.person .acts{justify-content:flex-start}}

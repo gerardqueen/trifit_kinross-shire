@@ -7,19 +7,19 @@ import { DEFAULTS } from './defaults.js';
 export { DEMO };
 export const TABLES = { coaches: 'tf_coaches', classes: 'tf_classes', memberships: 'tf_memberships', programming: 'tf_programming' };
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}` };
-const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+export const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
+export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 const byOrder = (name) => (a, b) => name === 'classes'
   ? a.day - b.day || String(a.start_time).localeCompare(String(b.start_time))
   : (a.sort ?? 0) - (b.sort ?? 0);
 
 // ---------- Demo store ----------
 const DEMO_KEY = 'tf-demo-v1';
-function demoRead() {
+export function demoRead() {
   try { const s = JSON.parse(localStorage.getItem(DEMO_KEY)); if (s && s.settings) return s; } catch {}
   return JSON.parse(JSON.stringify({ ...DEFAULTS, enquiries: [], invites: [] }));
 }
-function demoWrite(s) { try { localStorage.setItem(DEMO_KEY, JSON.stringify(s)); } catch {} }
+export function demoWrite(s) { try { localStorage.setItem(DEMO_KEY, JSON.stringify(s)); } catch {} }
 
 // ---------- Public page ----------
 /** Everything the landing page shows. Falls back to the built-in content if the database can't be reached. */
@@ -59,7 +59,7 @@ export async function sendEnquiry(row) {
 
 // ---------- Admin: sign-in ----------
 let _client;
-async function client() {
+export async function client() {
   if (DEMO) return null;
   if (!_client) {
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');

@@ -6,14 +6,18 @@ A one-page landing site with an admin page. Plain HTML, CSS and JavaScript: no b
 |---|---|
 | `index.html`, `js/site.js` | The public page: timetable, coaches, membership options, programming, enquiry form, social links |
 | `admin.html`, `js/admin.js` | Admin login (with "Forgot password?") and editors for everything on the page |
+| `app.html`, `js/app.js`, `js/portal.js` | Members portal: programming with each member's own numbers, scores and opt-in leaderboard, PBs, bookings; programming editor for coaches; people and programmes for admins |
 | `js/data.js` | Reads and writes Supabase; falls back to demo mode |
 | `js/defaults.js` | Starting content, also used if the database can't be reached |
 | `supabase/001_trifit.sql` | Tables, access rules, photo storage and starting content |
 | `supabase/functions/tf-enquiry-alert` | Emails each new enquiry to the contact email through Resend |
+| `supabase/002_portal.sql` | Members portal: people, programmes, workouts, scores, PBs, bookings and their access rules |
+| `supabase/functions/tf-teamup` | TeamUp link (membership check, bookings). Off until the secret `TF_TEAMUP_TOKEN` is set |
 
 ## Try it without a database
 
-Serve the folder (`python3 -m http.server`) and open `index.html?demo` and `admin.html?demo`.
+Serve the folder (`python3 -m http.server`) and open `index.html?demo`, `admin.html?demo` and
+`app.html?demo=member` (or `coach`, or `admin`).
 Demo mode needs no login and keeps changes in that browser only.
 
 ## Go live
@@ -34,3 +38,17 @@ Demo mode needs no login and keeps changes in that browser only.
 
 Admins → "Add an admin": enter their email, and they create their own account with it.
 Anyone who forgets their password uses "Forgot password?" on the login and gets a reset link.
+
+## Members portal
+
+Everyone signs in at `app.html`. New accounts wait until an admin switches them on (People
+tab), or until TeamUp confirms an active membership once the link is on. Roles: member, coach
+(writes programming), admin (also People, Programmes and the website content).
+
+A session marked **Tracked** lets members record a score. Each member chooses, per score,
+whether it goes on the leaderboard; unshared scores are visible only to them.
+
+**TeamUp:** a TeamUp Owner or Admin creates a machine-to-machine token (Settings →
+Integrations → API Integration → M2M Tokens) and saves it as the Supabase secret
+`TF_TEAMUP_TOKEN`. Until then bookings in the portal are previews and hold no place.
+The live TeamUp calls have not been tested yet; test them with the first real token.
