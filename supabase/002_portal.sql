@@ -132,6 +132,24 @@ create table if not exists public.tf_bookings (
 alter table public.tf_bookings enable row level security;
 
 -- ---------- Things people do through functions ----------
+-- An email an admin added in advance becomes an admin the first time that person signs in
+-- with a confirmed address, whichever page they sign in on.
+create or replace function public.tf_claim_invite() returns boolean
+language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); my_email text; confirmed timestamptz;
+begin
+  if me is null then return false; end if;
+  if public.tf_is_admin() then return true; end if;
+  select lower(u.email), u.email_confirmed_at into my_email, confirmed from auth.users u where u.id = me;
+  if confirmed is not null and exists (select 1 from public.tf_admin_invites i where i.email = my_email) then
+    insert into public.tf_admins (user_id, email) values (me, my_email) on conflict on constraint tf_admins_pkey do nothing;
+    delete from public.tf_admin_invites i where i.email = my_email;
+    delete from public.tf_access_requests r where r.user_id = me;
+    return true;
+  end if;
+  return false;
+end $$;
+
 -- Makes sure the signed-in person has a profile, and returns it with their role.
 create or replace function public.tf_me(p_name text default null)
 returns table (user_id uuid, email text, name text, role text, status text, board_default boolean,
@@ -141,7 +159,7 @@ declare me uuid := auth.uid(); my_email text; adm boolean;
 begin
   if me is null then return; end if;
   select lower(u.email) into my_email from auth.users u where u.id = me;
-  adm := public.tf_is_admin();
+  adm := public.tf_claim_invite();
   insert into public.tf_profiles (user_id, email, name, status)
   values (me, my_email, nullif(trim(coalesce(p_name, '')), ''), case when adm then 'active' else 'pending' end)
   on conflict on constraint tf_profiles_pkey do nothing;
@@ -255,6 +273,8 @@ revoke all on public.tf_profiles, public.tf_tracks, public.tf_track_access, publ
   public.tf_scores, public.tf_fives, public.tf_benchmarks, public.tf_bookings from anon;
 grant select, insert, update, delete on public.tf_profiles, public.tf_tracks, public.tf_track_access, public.tf_workouts,
   public.tf_workout_notes, public.tf_scores, public.tf_benchmarks, public.tf_bookings to authenticated;
+revoke execute on function public.tf_claim_invite() from public, anon;
+grant execute on function public.tf_claim_invite() to authenticated;
 revoke execute on function public.tf_is_staff(), public.tf_is_active(), public.tf_can_view_track(uuid), public.tf_me(text),
   public.tf_update_me(text, boolean), public.tf_set_person(uuid, text, text, uuid[]), public.tf_leaderboard(uuid),
   public.tf_toggle_five(uuid) from public, anon;
