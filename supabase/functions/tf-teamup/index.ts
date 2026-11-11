@@ -1,5 +1,6 @@
 // TRI FIT Kinross-shire: the link between the members portal and TeamUp.
-// Supabase Edge Function "tf-teamup" (Verify JWT on: only signed-in people can call it).
+// Supabase Edge Function "tf-teamup" (Verify JWT off: the function checks the signed-in person
+// itself, and everything except "status" needs a confirmed account).
 //
 // Until the gym adds its TeamUp token this answers { linked: false } and the portal stays in
 // preview mode. To switch it on, a TeamUp Owner or Admin creates a machine-to-machine token
@@ -57,13 +58,29 @@ const norm = (e: unknown) => String(e ?? '').trim().toLowerCase();
 const londonTime = (isoTs: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoTs));
 const londonDay = (isoTs: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date(isoTs));
 
+// The key this function uses to read and write the database. Newer Supabase projects supply it
+// as SUPABASE_SECRET_KEYS (a JSON list); older ones as SUPABASE_SERVICE_ROLE_KEY.
+function serviceKey(): string {
+  const direct = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY');
+  if (direct) return direct;
+  try {
+    const v = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? 'null');
+    const flat = Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v) : [];
+    for (const x of flat) {
+      const s = typeof x === 'string' ? x : (x as any)?.api_key ?? (x as any)?.key ?? (x as any)?.value;
+      if (typeof s === 'string' && s) return s;
+    }
+  } catch { /* not JSON */ }
+  return '';
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   let body: any = {}; try { body = await req.json(); } catch { /* empty body */ }
   const action = String(body.action ?? 'status');
   if (action === 'status') return json({ linked: !!TOKEN });
 
-  const db = createClient(Deno.env.get('SUPABASE_URL')!, (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY'))!);
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey());
   const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
   const { data: { user } } = await db.auth.getUser(jwt);
   if (!user?.email || !user.email_confirmed_at) return json({ ok: false, error: 'Please sign in first.' }, 401);

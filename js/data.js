@@ -63,7 +63,7 @@ export async function client() {
   if (DEMO) return null;
   if (!_client) {
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');
-    _client = createClient(SUPABASE_URL, KEY, { auth: { storageKey: 'tf-admin-auth' } });
+    _client = createClient(SUPABASE_URL, KEY, { auth: { storageKey: 'tf-auth-v2' } });
   }
   return _client;
 }

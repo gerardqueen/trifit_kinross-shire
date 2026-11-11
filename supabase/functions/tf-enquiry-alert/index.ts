@@ -1,5 +1,6 @@
 // TRI FIT Kinross-shire: email alert for new enquiries from the website form.
-// Supabase Edge Function "tf-enquiry-alert" (Verify JWT on; the public anon key is enough).
+// Supabase Edge Function "tf-enquiry-alert" (Verify JWT off: it takes no input and only ever
+// emails enquiries that are already in the database and not yet sent).
 //
 // Where it sends: the "Contact email" set on the admin page (Site details).
 // Secrets (Supabase → Edge Functions → Secrets):
@@ -26,15 +27,31 @@ const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const list = (v?: string | null) => (v ?? '').split(',').map((s) => s.trim()).filter((s) => /^\S+@\S+\.\S+$/.test(s));
 
+// The key this function uses to read and write the database. Newer Supabase projects supply it
+// as SUPABASE_SECRET_KEYS (a JSON list); older ones as SUPABASE_SERVICE_ROLE_KEY.
+function serviceKey(): string {
+  const direct = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY');
+  if (direct) return direct;
+  try {
+    const v = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? 'null');
+    const flat = Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v) : [];
+    for (const x of flat) {
+      const s = typeof x === 'string' ? x : (x as any)?.api_key ?? (x as any)?.key ?? (x as any)?.value;
+      if (typeof s === 'string' && s) return s;
+    }
+  } catch { /* not JSON */ }
+  return '';
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   const key = Deno.env.get('RESEND_API_KEY') ?? Deno.env.get('Resend_API_Key') ?? Deno.env.get('RESEND_API_key');
   const fallback = list(Deno.env.get('TF_ALERT_TO'));
-  if (!key || !fallback.length) return json({ ok: false, reason: 'RESEND_API_KEY or TF_ALERT_TO not set yet' });
+  if (!key || !fallback.length || !serviceKey()) return json({ ok: false, reason: 'Not set up yet', resendKey: !!key, alertTo: fallback.length > 0, databaseKey: !!serviceKey() });
 
   const from = Deno.env.get('TF_ALERT_FROM') ?? 'TRI FIT website <onboarding@resend.dev>';
   const site = Deno.env.get('TF_SITE_URL') ?? '';
-  const db = createClient(Deno.env.get('SUPABASE_URL')!, (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY'))!);
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey());
 
   // The gym's contact email, as set on the admin page.
   const { data: content } = await db.from('tf_content').select('value').eq('key', 'settings').maybeSingle();

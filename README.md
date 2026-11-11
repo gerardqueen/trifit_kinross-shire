@@ -20,7 +20,13 @@ Serve the folder (`python3 -m http.server`) and open `index.html?demo`, `admin.h
 `app.html?demo=member` (or `coach`, or `admin`).
 Demo mode needs no login and keeps changes in that browser only.
 
-## Go live
+## Where it runs
+
+GitHub Pages serves the files. The database, sign-in, photos and functions are the Supabase
+project **trifit-kinross** (its address and publishable key are in `js/config.js`). It shares
+nothing with any other site.
+
+## Go live (already done; kept for rebuilding elsewhere)
 
 1. **GitHub Pages:** push this folder to a repo and turn Pages on for the `main` branch.
 2. **Database:** in Supabase → SQL Editor, run `supabase/001_trifit.sql`. At the bottom of that
