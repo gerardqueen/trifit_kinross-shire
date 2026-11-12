@@ -14,19 +14,22 @@ const parseDay = (s) => { const [y, m, d] = s.split('-').map(Number); return new
 const dayLabel = (d, long) => d.toLocaleDateString('en-GB', long ? { weekday: 'long', day: 'numeric', month: 'long' } : { day: 'numeric', month: 'short' });
 const SETUP_MSG = "The members area isn't switched on yet: supabase/002_portal.sql still needs to be run.";
 const nice = (m) => (/schema cache|does not exist|Could not find the (table|function)/i.test(m || '') ? SETUP_MSG : (m || 'Something went wrong'));
-let ME = null, TRACKS = [], PBS = {}, LINKED = false;
+let ME = null, TRACKS = [], PBS = {}, LINKED = false, DEFS = [], LOG = [], BENCH = {};
 const isStaff = () => ME.role === 'admin' || ME.role === 'coach';
 
 // ---------- Benchmarks and the percentage engine ----------
 // A lift percentage is a straight share of the 1 rep max, rounded to the nearest 2.5kg.
 // A timed percentage is effort: pace scales with power to the minus one third, so 80% is
 // about 8% slower, not 20% faster.
-export const BENCH = {
-  'Back Squat': { type: 'lift' }, 'Front Squat': { type: 'lift' }, 'Deadlift': { type: 'lift' }, 'Clean & Jerk': { type: 'lift' },
-  'Snatch': { type: 'lift' }, 'Strict Press': { type: 'lift' }, 'Bench Press': { type: 'lift' },
-  '2k Row': { type: 'time', dist: 2000 }, '500m Row': { type: 'time', dist: 500 }, '5k Row': { type: 'time', dist: 5000 },
-  '1k Ski': { type: 'time', dist: 1000 }, '1k Run': { type: 'time', dist: 1000 }, '5k Run': { type: 'time', dist: 5000 },
-};
+// What can be tracked comes from the database (coaches manage it on the PBs tab). A member's PB
+// for each is their best logged result: the heaviest lift, most reps, or fastest time.
+const better = (kind) => (kind === 'time' ? (a, b) => a < b : (a, b) => a > b);
+async function loadBench() {
+  [DEFS, LOG] = await Promise.all([db.benchDefs(), db.benchLog()]);
+  BENCH = Object.fromEntries(DEFS.map((d) => [d.name, { type: d.kind, dist: d.distance_m || null }]));
+  PBS = {};
+  for (const e of LOG) { const def = BENCH[e.name]; if (def && (PBS[e.name] == null || better(def.type)(e.value, PBS[e.name]))) PBS[e.name] = e.value; }
+}
 const fmtKg = (v) => parseFloat((+v).toFixed(2)) + 'kg';
 const fmtTime = (s) => { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const parseTime = (raw) => { const p = String(raw).trim().replace(/\./g, ':').split(':').map((n) => parseInt(n, 10)); if (p.some((n) => !Number.isFinite(n))) return NaN; return p.length === 1 ? p[0] : p.length === 2 ? p[0] * 60 + p[1] : p[0] * 3600 + p[1] * 60 + p[2]; };
@@ -39,8 +42,9 @@ function resolve(text, pbs) {
     const pb = pbs[name];
     if (pb == null) return `<span class="tok miss">${p}% ${esc(name)} (add your PB)</span>`;
     if (def.type === 'lift') return `<span class="tok"><b>${fmtKg(load(pb, +p))}</b><i>${p}% of ${fmtKg(pb)}</i></span>`;
+    if (def.type === 'reps') return `<span class="tok"><b>${Math.max(1, Math.round(pb * p / 100))} reps</b><i>${p}% of ${pb}</i></span>`;
     const t = effort(pb, +p);
-    if (per) return `<span class="tok"><b>${fmtTime(t / def.dist * per)} /${per}m</b><i>${p}% of ${fmtTime(pb)}</i></span>`;
+    if (per && def.dist) return `<span class="tok"><b>${fmtTime(t / def.dist * per)} /${per}m</b><i>${p}% of ${fmtTime(pb)}</i></span>`;
     return `<span class="tok"><b>${fmtTime(t)}</b><i>${p}% of ${fmtTime(pb)}</i></span>`;
   }).replace(/\n/g, '<br>');
 }
@@ -86,7 +90,7 @@ async function boot() {
   $('#demo-banner').hidden = !ME.demo;
   if (ME.demo) $('#demo-banner').innerHTML = `Demo mode: you are looking at the ${esc(ME.role)} view. Nothing is saved outside this browser. Switch to ${['member', 'coach', 'admin'].filter((r) => r !== ME.role).map((r) => `<a href="?demo=${r}">${r}</a>`).join(' or ')}.`;
   $('#who').textContent = ME.demo ? '' : `${ME.name || ME.email} · ${ME.role}`;
-  [TRACKS, PBS] = await Promise.all([db.tracks(), db.benchmarks()]);
+  [TRACKS] = await Promise.all([db.tracks(), loadBench()]);
   db.teamup('status').then((r) => { LINKED = !!r.linked; if (TAB === 'book' || TAB === 'account') openTab(TAB); });
   drawTabs(); openTab(TAB);
 }
@@ -206,28 +210,44 @@ function wireWeek(redraw) {
 const inWeek = () => { if (DAY < iso(WEEK) || DAY > iso(addDays(WEEK, 6))) DAY = iso(WEEK); };
 
 // ---------- Training ----------
+let ASMEMBER = false;
 async function trainingTab() {
   inWeek();
-  const ws = await db.workouts(iso(WEEK), iso(addDays(WEEK, 6))), today = ws.filter((w) => w.day === DAY);
+  const asM = isStaff() && ASMEMBER;
+  const ws = (await db.workouts(iso(WEEK), iso(addDays(WEEK, 6)))).filter((w) => !asM || (w.published && TRACKS.find((t) => t.id === w.track_id)?.audience !== 'coaches'));
+  const today = ws.filter((w) => w.day === DAY);
   const boards = await Promise.all(today.map((w) => (w.tracked ? db.leaderboard(w.id) : [])));
-  $('#pane').innerHTML = weekNav(ws) + `<h3 class="dayhead">${dayLabel(parseDay(DAY), true)}</h3>` + (today.length ? `<div class="wgrid">${today.map((w, i) => workoutCard(w, boards[i])).join('')}</div>`
-    : `<p class="hint">Nothing programmed for this day${isStaff() ? '. Add a session from the Programming tab.' : ' yet.'}</p>`);
+  const cards = today.length ? today.map((w, i) => workoutCard(w, boards[i], { asMember: asM })).join('')
+    : `<p class="hint">Nothing programmed for this day${isStaff() && !asM ? '. Add a session from the Programming tab.' : ' yet.'}</p>`;
+  const toggle = isStaff() ? `<div class="formrow" style="justify-content:space-between;margin-bottom:12px"><h3 class="dayhead" style="margin:0">${dayLabel(parseDay(DAY), true)}</h3>
+      <button class="ib" id="as-member" aria-pressed="${asM}">${asM ? 'Back to coach view' : 'See this day as a member'}</button></div>` : `<h3 class="dayhead">${dayLabel(parseDay(DAY), true)}</h3>`;
+  $('#pane').innerHTML = weekNav(ws) + toggle + (asM
+    ? `<p class="hint" style="margin-bottom:12px">Member view on a phone: published sessions only, no coach notes, with your own PBs filling in the numbers.</p>${phone(cards, dayLabel(parseDay(DAY), true))}`
+    : today.length ? `<div class="wgrid">${cards}</div>` : cards);
   wireWeek(trainingTab);
+  if ($('#as-member')) $('#as-member').onclick = () => { ASMEMBER = !ASMEMBER; trainingTab(); };
   today.forEach((w, i) => wireWorkout(w, boards[i]));
 }
+// A phone-sized frame showing what the app looks like to a member.
+function phone(inner, sub = '') {
+  return `<div class="phone"><div class="phone-top"><img src="img/logo.png" alt=""><span><b>TRI FIT</b><small>${esc(sub)}</small></span></div><div class="phone-screen">${inner}</div>
+    <div class="phone-tabs" aria-hidden="true"><span class="on">Training</span><span>Book</span><span>PBs</span><span>Account</span></div></div>`;
+}
+const SAMPLE_PBS = { 'Back Squat': 90, 'Front Squat': 75, 'Deadlift': 120, 'Clean & Jerk': 62.5, 'Snatch': 47.5, 'Strict Press': 42.5, 'Bench Press': 65, '2k Row': 470, '500m Row': 104, '5k Row': 1260, '1k Ski': 245, '1k Run': 275, '5k Run': 1560 };
 function rank(rows, type) {
   const dir = SCORE[type].lowerWins ? 1 : -1;
   return rows.slice().sort((a, b) => (b.rx - a.rx) || dir * (a.value - b.value));
 }
-function workoutCard(w, board) {
+function workoutCard(w, board, opt = {}) {
+  const staffView = isStaff() && !opt.asMember, pbs = opt.pbs || PBS;
   const mine = board.find((r) => r.is_me), sc = SCORE[w.score_type], pub = rank(board.filter((r) => r.is_public), w.score_type);
   return `<article class="panel wk" data-w="${esc(w.id)}">
     <div class="formrow" style="justify-content:space-between"><span class="tag">${esc(trackName(w.track_id))}</span>
-      <span class="formrow">${w.published ? '' : '<span class="tag out">Draft</span>'}${w.tracked ? '<span class="tag out">Tracked</span>' : ''}${isStaff() ? '<button class="ib" data-editw>Edit</button>' : ''}</span></div>
+      <span class="formrow">${w.published ? '' : '<span class="tag out">Draft</span>'}${w.tracked ? '<span class="tag out">Tracked</span>' : ''}${staffView ? '<button class="ib" data-editw>Edit</button>' : ''}</span></div>
     <h3 class="wtitle">${esc(w.title)}</h3>
-    <p class="wbody">${resolve(w.body, PBS)}</p>
-    ${isStaff() && w.notes ? `<p class="coachnote"><b>Coach notes.</b> ${esc(w.notes).replace(/\n/g, '<br>')}</p>` : ''}
-    ${w.tracked ? `<div class="scorebox">
+    <p class="wbody">${resolve(w.body, pbs)}</p>
+    ${staffView && w.notes ? `<p class="coachnote"><b>Coach notes.</b> ${esc(w.notes).replace(/\n/g, '<br>')}</p>` : ''}
+    ${w.tracked ? `<div class="scorebox" ${opt.inert ? 'inert' : ''}>
       ${mine ? `<div class="formrow" style="justify-content:space-between"><div><span class="lab">Your score</span><div class="myscore">${sc.show(mine.value)} <small>${mine.rx ? 'Rx' : 'Scaled'} · ${mine.is_public ? 'on the leaderboard' : 'private, only you can see it'}</small></div></div>
           <span class="formrow"><button class="ib" data-rescore>Change</button><button class="ib" data-unscore>Remove</button></span></div>` : ''}
       <form class="scoreform" ${mine ? 'hidden' : ''} novalidate>
@@ -265,8 +285,8 @@ async function programmingTab() {
   inWeek();
   const ws = await db.workouts(iso(WEEK), iso(addDays(WEEK, 6))), editing = ws.find((w) => w.id === EDIT) || null;
   const w = editing || { day: DAY, track_id: TRACKS[0]?.id, title: '', body: '', notes: '', tracked: false, score_type: 'time', published: true };
-  const tokens = ['{80% Back Squat}', '{75% Deadlift}', '{70% Clean & Jerk}', '{90% 2k Row /500m}', '{80% 1k Ski /500m}', '{85% 1k Run}'];
-  $('#pane').innerHTML = weekNav(ws) + `<div class="split">
+  const tokens = DEFS.map((d) => `{80% ${d.name}${d.kind === 'time' && d.distance_m && d.distance_m !== 500 && /row|ski|bike|erg/i.test(d.name) ? ' /500m' : ''}}`);
+  $('#pane').innerHTML = weekNav(ws) + `<div class="split three">
     <div class="rows">${ws.length ? [...new Set(ws.map((x) => x.day))].map((d) => `<h3>${dayLabel(parseDay(d), true)}</h3>` + ws.filter((x) => x.day === d).map((x) => `<div class="rw ${x.published ? '' : 'off'} ${editing?.id === x.id ? 'editing' : ''}" data-id="${esc(x.id)}">
         <div class="txt"><b>${esc(x.title)}</b><span>${esc(trackName(x.track_id))}${x.tracked ? ' · tracked' : ''}${x.published ? '' : ' · draft'}</span></div>
         <div class="acts"><button class="ib" data-copy title="Copy to the same day next week">Copy +7</button><button class="ib" data-edit>Edit</button><button class="ib" data-del>Delete</button></div></div>`).join('')).join('')
@@ -278,19 +298,27 @@ async function programmingTab() {
       <div class="field"><label for="w-title">Title</label><input id="w-title" maxlength="100" value="${esc(w.title)}" required></div>
       <div class="field"><label for="w-body">Session</label><textarea id="w-body" rows="7" maxlength="4000" placeholder="A. Back squat 5 x 3 @ {80% Back Squat}">${esc(w.body)}</textarea>
         <div class="chips">${tokens.map((t) => `<button type="button" class="chip" data-tok="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-        <p class="hint">Percentages in curly brackets turn into each member's own load or split from their PBs.</p></div>
-      <div class="field"><span class="lab">Preview with your PBs</span><p class="wbody preview" id="w-prev"></p></div>
+        <p class="hint">Percentages in curly brackets turn into each member's own load, reps or split from their PBs. Change the 80 to whatever you need.</p></div>
       <div class="field"><label for="w-notes">Coach notes <span class="opt">only coaches see these</span></label><textarea id="w-notes" rows="3" maxlength="3000">${esc(w.notes || '')}</textarea></div>
       <label class="check"><input type="checkbox" id="w-tracked" ${w.tracked ? 'checked' : ''}> Tracked: members can record a score and choose whether it goes on the leaderboard</label>
       <div class="field" id="w-type-field"><label for="w-type">Scored by</label><select id="w-type">${Object.entries(SCORE).map(([k, v]) => `<option value="${k}" ${k === w.score_type ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
       <label class="check"><input type="checkbox" id="w-pub" ${w.published ? 'checked' : ''}> Published: members can see it</label>
       <div class="formrow"><button class="btn" type="submit" id="w-save">${editing ? 'Save changes' : 'Add session'}</button>${editing ? '<button class="btn ghost" type="button" id="w-cancel">Cancel</button>' : ''}</div>
       <p class="error" id="w-error" hidden role="alert"></p>
-    </form></div>`;
+    </form>
+    <div class="pvcol"><div class="formrow" style="justify-content:space-between;margin-bottom:10px"><span class="lab">What members see in the app</span>
+        <select id="w-pv-as" aria-label="Whose numbers to show" style="width:auto"><option value="me">With my PBs</option><option value="sample">A sample member</option><option value="none">A member with no PBs yet</option></select></div>
+      <div id="w-prev"></div>
+      <p class="hint" style="margin-top:10px">Updates as you type. Coach notes never appear here. A draft is shown as it will look once published.</p></div></div>`;
   wireWeek(() => { EDIT = null; programmingTab(); });
-  const form = $('#w-form'), body = $('#w-body'), prev = () => ($('#w-prev').innerHTML = resolve(body.value, PBS) || '<span class="hint">Nothing yet.</span>');
+  const form = $('#w-form'), body = $('#w-body');
+  const prev = () => {
+    const as = $('#w-pv-as').value, pbs = as === 'me' ? PBS : as === 'sample' ? SAMPLE_PBS : {}, day = $('#w-day').value;
+    const draft = { id: 'preview', track_id: $('#w-track').value, day, title: $('#w-title').value.trim() || 'Session title', body: body.value.trim() || 'Your session text appears here.', tracked: $('#w-tracked').checked, score_type: $('#w-type').value, published: true };
+    $('#w-prev').innerHTML = phone(`<h3 class="dayhead">${/^\d{4}-\d{2}-\d{2}$/.test(day) ? dayLabel(parseDay(day), true) : ''}</h3>` + workoutCard(draft, [], { asMember: true, pbs, inert: true }), 'Training');
+  };
   const typeVis = () => ($('#w-type-field').hidden = !$('#w-tracked').checked);
-  body.oninput = prev; $('#w-tracked').onchange = typeVis; prev(); typeVis();
+  form.addEventListener('input', prev); form.addEventListener('change', () => { typeVis(); prev(); }); $('#w-pv-as').onchange = prev; typeVis(); prev();
   $$('[data-tok]', form).forEach((b) => (b.onclick = () => { const s = body.selectionStart ?? body.value.length; body.setRangeText(b.dataset.tok, s, body.selectionEnd ?? s, 'end'); body.focus(); prev(); }));
   if (editing) { $('#w-cancel').onclick = () => { EDIT = null; programmingTab(); }; if (matchMedia('(max-width:900px)').matches) form.scrollIntoView({ block: 'start' }); }
   form.onsubmit = async (e) => {
@@ -335,24 +363,87 @@ async function bookTab() {
 }
 
 // ---------- PBs ----------
+// Each tracked lift or test keeps every dated result, so a member can see how far they have come.
+let PBSEL = null;
+const KIND = { lift: 'Lifts', time: 'Timed tests', reps: 'Max reps' };
+const showVal = (def, v) => (def.type === 'lift' ? fmtKg(v) : def.type === 'time' ? fmtTime(v) : `${parseFloat((+v).toFixed(1))} reps`);
+const shortDay = (d) => parseDay(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+// Improvement from one result to another, as a percentage: heavier, more, or faster.
+const gain = (def, from, to) => (def.type === 'time' ? (from - to) / from : (to - from) / from) * 100;
+const pct = (g) => `${g >= 0 ? '+' : '−'}${Math.abs(g).toFixed(1)}%`;
+function trend(def, entries, big) {
+  if (entries.length < 2) return '';
+  const W = big ? 560 : 120, H = big ? 150 : 34, pad = big ? 18 : 4, t0 = parseDay(entries[0].day).getTime(), t1 = parseDay(entries.at(-1).day).getTime();
+  const vs = entries.map((e) => e.value), lo = Math.min(...vs), hi = Math.max(...vs), span = hi - lo || 1;
+  const x = (e, i) => pad + (t1 > t0 ? (parseDay(e.day).getTime() - t0) / (t1 - t0) : i / (entries.length - 1)) * (W - 2 * pad);
+  const y = (v) => { const r = (v - lo) / span; return pad + (def.type === 'time' ? r : 1 - r) * (H - 2 * pad - (big ? 16 : 0)); }; // better is always higher on the chart
+  const pts = entries.map((e, i) => [x(e, i), y(e.value)]), best = PBS[entries[0].name];
+  return `<svg class="trend ${big ? 'big' : ''}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Results over time">
+    <polyline points="${pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#fff" stroke-width="${big ? 2 : 1.5}" stroke-linejoin="round"/>
+    ${pts.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${big ? 4.5 : 2.5}" fill="${entries[i].value === best ? '#f0c02c' : '#fff'}" stroke="#000" stroke-width="${big ? 1.5 : 0}"/>`).join('')}
+    ${big ? `<text x="${pad}" y="${H - 3}">${shortDay(entries[0].day)} · ${showVal(def, entries[0].value)}</text><text x="${W - pad}" y="${H - 3}" text-anchor="end">${shortDay(entries.at(-1).day)} · ${showVal(def, entries.at(-1).value)}</text>` : ''}</svg>`;
+}
 async function pbsTab() {
-  PBS = await db.benchmarks();
-  const row = (n) => { const def = BENCH[n], v = PBS[n], lift = def.type === 'lift';
-    return `<div class="rw"><div class="txt"><b>${esc(n)}</b><span>${lift ? '1 rep max in kg' : `best time, m:ss${v && def.dist !== 500 ? ` · ${fmtTime(v / def.dist * 500)} /500m` : ''}`}</span></div>
-      <input class="pbin" data-pb="${esc(n)}" inputmode="${lift ? 'decimal' : 'numeric'}" placeholder="${lift ? 'kg' : 'm:ss'}" value="${v ? (lift ? parseFloat(v.toFixed(2)) : fmtTime(v)) : ''}" aria-label="${esc(n)}"></div>`; };
-  const names = Object.keys(BENCH);
-  $('#pane').innerHTML = `<p class="hint" style="margin-bottom:16px">Your personal bests are private. They turn the percentages in the programming into your own loads and splits.</p>
-    <form id="pb-form" class="rows" style="max-width:640px" novalidate><h3>Lifts</h3>${names.filter((n) => BENCH[n].type === 'lift').map(row).join('')}<h3>Ergs and runs</h3>${names.filter((n) => BENCH[n].type === 'time').map(row).join('')}
-      <div class="formrow" style="margin-top:10px"><button class="btn" type="submit">Save PBs</button></div><p class="error" id="pb-error" hidden role="alert"></p></form>`;
-  $('#pb-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const err = $('#pb-error'), out = {}; err.hidden = true;
-    for (const el of $$('[data-pb]')) { const n = el.dataset.pb, raw = el.value.trim(); if (!raw) { out[n] = 0; continue; }
-      const v = BENCH[n].type === 'lift' ? parseFloat(raw.replace(/[^\d.]/g, '')) : parseTime(raw);
-      if (!Number.isFinite(v) || v <= 0) { err.textContent = `Check ${n}: ${BENCH[n].type === 'lift' ? 'enter a weight in kg' : 'enter a time as m:ss'}.`; err.hidden = false; el.focus(); return; }
-      out[n] = v; }
-    try { await db.saveBenchmarks(out); flash('PBs saved. Your programming now uses them.'); pbsTab(); } catch (ex) { err.textContent = nice(ex.message); err.hidden = false; }
+  await loadBench();
+  const today = iso(new Date());
+  const row = (d) => {
+    const def = BENCH[d.name], es = LOG.filter((e) => e.name === d.name), best = PBS[d.name], open = PBSEL === d.name, g = es.length > 1 ? gain(def, es[0].value, best) : null;
+    return `<div class="pb ${open ? 'open' : ''}" data-name="${esc(d.name)}">
+      <button type="button" class="pbhead" aria-expanded="${open}">
+        <span class="txt"><b>${esc(d.name)}</b><span>${es.length ? (g != null ? `${pct(g)} since ${shortDay(es[0].day)} · ${es.length} results` : `First result ${shortDay(es[0].day)}`) : 'No result yet'}</span></span>
+        ${trend(def, es, false)}
+        <span class="pbval">${best != null ? showVal(def, best) : '—'}${best != null && def.type === 'time' && def.dist && def.dist !== 500 ? `<small>${fmtTime(best / def.dist * 500)} /500m</small>` : ''}</span></button>
+      ${open ? `<div class="pbbody">
+        ${g != null ? `<p class="pbgain"><b>${pct(g)}</b> ${def.type === 'time' ? 'faster' : def.type === 'lift' ? 'heavier' : 'more'} than your first result (${showVal(def, es[0].value)} on ${shortDay(es[0].day)}).</p>` : ''}
+        ${trend(def, es, true)}
+        <form class="scoreform pbadd" novalidate><label class="field"><span class="lab">${def.type === 'lift' ? 'Weight in kg' : def.type === 'time' ? 'Time (m:ss)' : 'Reps'}</span><input data-v inputmode="${def.type === 'time' ? 'numeric' : 'decimal'}" placeholder="${def.type === 'time' ? '7:21' : ''}"></label>
+          <label class="field" style="width:160px"><span class="lab">Date</span><input data-d type="date" value="${today}" max="${today}"></label>
+          <button class="btn sm" type="submit">Add result</button><p class="error" hidden role="alert" style="width:100%"></p></form>
+        ${es.length ? `<div class="lb">${es.slice().reverse().map((e) => `<div class="lbrow" style="grid-template-columns:minmax(0,1fr) auto auto auto"><span class="nm"><b>${shortDay(e.day)}</b></span><span class="hint">${e === es[0] ? 'first' : pct(gain(def, es[0].value, e.value))}</span>
+          <span class="sc">${showVal(def, e.value)}${e.value === best ? ' <span class="tag">PB</span>' : ''}</span><button type="button" class="ib" data-del="${esc(e.id)}">Delete</button></div>`).join('')}</div>` : ''}</div>` : ''}</div>`;
   };
+  $('#pane').innerHTML = `<p class="hint" style="margin-bottom:16px">Your results are private. The best one for each lift or test is your PB, and it turns the percentages in the programming into your own numbers. Tap one to add a result or see your history.</p>
+    <div class="pbs">${Object.keys(KIND).map((k) => { const ds = DEFS.filter((d) => d.kind === k); return ds.length ? `<h3 class="dayhead" style="margin-top:18px">${KIND[k]}</h3>${ds.map(row).join('')}` : ''; }).join('') || '<p class="hint">Nothing is being tracked yet.</p>'}</div>
+    ${isStaff() ? `<h3 class="grp" style="margin-top:34px">Tracked lifts and tests (coaches)</h3>
+      <p class="hint" style="margin:10px 0 14px">This list is what every member can log and what you can use in programming, written as {80% Name}. Removing one hides it from members; their results are kept and come back if you add the same name again.</p>
+      <div class="split"><div class="rows">${DEFS.map((d) => `<div class="rw" data-def="${esc(d.id)}"><div class="txt"><b>${esc(d.name)}</b><span>${d.kind === 'lift' ? 'Lift, in kg' : d.kind === 'time' ? `Timed test${d.distance_m ? `, ${d.distance_m}m` : ''}` : 'Max reps'}</span></div><div class="acts"><button class="ib" data-deldef>Remove</button></div></div>`).join('')}</div>
+        <form class="panel" id="def-form" novalidate><h2 style="font-size:21px">Add a lift or test</h2>
+          <div class="field"><label for="d-name">Name</label><input id="d-name" maxlength="40" placeholder="Thruster, 400m Run, Max pull-ups"></div>
+          <div class="field"><label for="d-kind">Measured as</label><select id="d-kind"><option value="lift">Lift, in kg (heavier is better)</option><option value="time">Timed test (faster is better)</option><option value="reps">Max reps (more is better)</option></select></div>
+          <div class="field" id="d-dist-field" hidden><label for="d-dist">Distance in metres <span class="opt">optional, for pace per 500m</span></label><input id="d-dist" inputmode="numeric" placeholder="2000"></div>
+          <div class="formrow"><button class="btn" type="submit">Add to the list</button></div><p class="error" id="d-error" hidden role="alert"></p></form></div>` : ''}`;
+
+  $('.pbs').onclick = async (e) => {
+    const box = e.target.closest('.pb'); if (!box) return;
+    if (e.target.closest('.pbhead')) { PBSEL = PBSEL === box.dataset.name ? null : box.dataset.name; return pbsTab(); }
+    const del = e.target.closest('[data-del]');
+    if (del && armed(del)) { await db.deleteBenchEntry(del.dataset.del); pbsTab(); }
+  };
+  const add = $('.pbadd');
+  if (add) add.onsubmit = async (e) => {
+    e.preventDefault();
+    const name = add.closest('.pb').dataset.name, def = BENCH[name], err = $('.error', add), raw = $('[data-v]', add).value.trim(), day = $('[data-d]', add).value; err.hidden = true;
+    const v = def.type === 'time' ? parseTime(raw) : parseFloat(raw.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(v) || v <= 0) { err.textContent = def.type === 'time' ? 'Enter the time as m:ss, for example 7:21.' : 'Enter a number.'; err.hidden = false; return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day > today) { err.textContent = 'Choose a date that is today or earlier.'; err.hidden = false; return; }
+    const before = PBS[name];
+    try { await db.addBenchEntry(name, v, day); flash(before == null ? 'First result saved.' : better(def.type)(v, before) ? `New PB: ${pct(gain(def, before, v))} on your previous best.` : 'Result saved. Your PB is unchanged.'); pbsTab(); }
+    catch (ex) { err.textContent = nice(ex.message); err.hidden = false; }
+  };
+  const df = $('#def-form');
+  if (df) {
+    $('#d-kind').onchange = () => ($('#d-dist-field').hidden = $('#d-kind').value !== 'time');
+    df.onsubmit = async (e) => {
+      e.preventDefault();
+      const err = $('#d-error'), name = $('#d-name').value.trim().replace(/\s+/g, ' '), kind = $('#d-kind').value, dist = parseInt($('#d-dist').value, 10); err.hidden = true;
+      if (!name) { err.textContent = 'Please give it a name.'; err.hidden = false; return; }
+      if (/[{}\/%]/.test(name)) { err.textContent = 'The name cannot contain { } / or %.'; err.hidden = false; return; }
+      if (DEFS.some((d) => d.name.toLowerCase() === name.toLowerCase())) { err.textContent = 'That name is already on the list.'; err.hidden = false; return; }
+      try { await db.saveBenchDef({ name, kind, distance_m: kind === 'time' && dist > 0 ? dist : null }); flash(`${name} added. Members can log it now.`); pbsTab(); }
+      catch (ex) { err.textContent = nice(ex.message); err.hidden = false; }
+    };
+    $('.split .rows').onclick = async (e) => { const del = e.target.closest('[data-deldef]'); if (del && armed(del)) { await db.deleteBenchDef(del.closest('.rw').dataset.def); flash('Removed from the list.'); pbsTab(); } };
+  }
 }
 
 // ---------- Account ----------

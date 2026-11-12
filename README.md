@@ -12,6 +12,7 @@ A one-page landing site with an admin page. Plain HTML, CSS and JavaScript: no b
 | `supabase/001_trifit.sql` | Tables, access rules, photo storage and starting content |
 | `supabase/functions/tf-enquiry-alert` | Emails each new enquiry to the contact email through Resend |
 | `supabase/002_portal.sql` | Members portal: people, programmes, workouts, scores, PBs, bookings and their access rules |
+| `supabase/003_benchmarks.sql` | Tracked lifts and tests (coaches manage the list) and each member's dated results |
 | `supabase/functions/tf-teamup` | TeamUp link (membership check, bookings). Off until the secret `TF_TEAMUP_TOKEN` is set |
 
 ## Try it without a database
@@ -58,3 +59,10 @@ whether it goes on the leaderboard; unshared scores are visible only to them.
 Integrations → API Integration → M2M Tokens) and saves it as the Supabase secret
 `TF_TEAMUP_TOKEN`. Until then bookings in the portal are previews and hold no place.
 The live TeamUp calls have not been tested yet; test them with the first real token.
+
+**Preview for coaches:** the Programming tab shows a live phone-sized view of the session as a
+member will see it, with your PBs, a sample member's, or none. On the Training tab, "See this
+day as a member" does the same for a whole day.
+
+**PB history:** coaches add or remove tracked lifts and tests on the PBs tab. Members log dated
+results; the best is their PB, and each one shows the improvement since their first result.

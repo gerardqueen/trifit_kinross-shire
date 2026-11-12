@@ -31,7 +31,12 @@ function demo() {
       me: { name: 'Jamie R.', board_default: true }, tracks, workouts,
       notes: { w2: 'Aim for a round every 1:45. Scale toes-to-bar to hanging knee raises before slowing the row.' },
       scores: others.map(([name, value, rx, fives], i) => ({ id: 's' + i, workout_id: 'w2', user: 'u' + i, name, value, rx, public: true, fives, fived: false })),
-      benchmarks: { 'Back Squat': 110, 'Deadlift': 150, 'Clean & Jerk': 77.5, 'Strict Press': 55, '2k Row': 448, '500m Row': 98 },
+      defs: [['Back Squat', 'lift'], ['Front Squat', 'lift'], ['Deadlift', 'lift'], ['Clean & Jerk', 'lift'], ['Snatch', 'lift'], ['Strict Press', 'lift'], ['Bench Press', 'lift'],
+        ['2k Row', 'time', 2000], ['500m Row', 'time', 500], ['5k Row', 'time', 5000], ['1k Ski', 'time', 1000], ['1k Run', 'time', 1000], ['5k Run', 'time', 5000]]
+        .map(([name, kind, distance_m = null], i) => ({ id: 'b' + i, name, kind, distance_m, sort: i + 1 })),
+      log: [['Back Squat', 97.5, -160], ['Back Squat', 102.5, -110], ['Back Squat', 105, -62], ['Back Squat', 110, -20], ['Deadlift', 140, -150], ['Deadlift', 150, -35],
+        ['Clean & Jerk', 70, -120], ['Clean & Jerk', 77.5, -28], ['Strict Press', 55, -40], ['2k Row', 471, -140], ['2k Row', 459, -75], ['2k Row', 448, -14], ['500m Row', 98, -9]]
+        .map(([name, value, ago], i) => ({ id: 'l' + i, name, value, day: iso(addDays(new Date(), ago)) })),
       bookings: [],
       people: [
         { user_id: 'p1', email: 'new.member@example.com', name: 'New Member', role: 'member', status: 'pending', teamup_plan: null, tracks: [] },
@@ -41,6 +46,7 @@ function demo() {
     };
     demoWrite(s);
   }
+  if (!s.portal.defs) { localStorage.removeItem('tf-demo-v1'); return demo(); } // demo data from before PB history: start it again
   return s;
 }
 const dsave = (s) => demoWrite(s);
@@ -138,18 +144,36 @@ export async function toggleFive(scoreId) {
   const c = await client(); must(await c.rpc('tf_toggle_five', { p_score: scoreId }));
 }
 
-// ---------- Personal bests ----------
-export async function benchmarks() {
-  if (DEMO) return { ...demo().portal.benchmarks };
-  const c = await client();
-  return Object.fromEntries(must(await c.from('tf_benchmarks').select('name,value')).map((r) => [r.name, Number(r.value)]));
+// ---------- Tracked lifts and tests, and each member's results ----------
+/** What the gym tracks: {id, name, kind: lift|time|reps, distance_m}. Coaches manage the list. */
+export async function benchDefs() {
+  if (DEMO) return demo().portal.defs.slice().sort((a, b) => a.sort - b.sort);
+  const c = await client(); return must(await c.from('tf_benchmark_defs').select('*').order('sort').order('created_at'));
 }
-export async function saveBenchmarks(map) {
-  if (DEMO) { const s = demo(); s.portal.benchmarks = Object.fromEntries(Object.entries(map).filter(([, v]) => v > 0)); return dsave(s); }
+export async function saveBenchDef({ id, ...rest }) {
+  if (DEMO) { const s = demo(), a = s.portal.defs; if (id) Object.assign(a.find((x) => x.id === id), rest); else a.push({ id: uid(), sort: Math.max(0, ...a.map((x) => x.sort)) + 1, ...rest }); return dsave(s); }
   const c = await client();
-  const keep = Object.entries(map).filter(([, v]) => v > 0), drop = Object.entries(map).filter(([, v]) => !(v > 0)).map(([k]) => k);
-  if (keep.length) must(await c.from('tf_benchmarks').upsert(keep.map(([name, value]) => ({ user_id: ME.user_id, name, value, updated_at: new Date().toISOString() }))));
-  if (drop.length) must(await c.from('tf_benchmarks').delete().eq('user_id', ME.user_id).in('name', drop));
+  if (id) return must(await c.from('tf_benchmark_defs').update(rest).eq('id', id));
+  const top = must(await c.from('tf_benchmark_defs').select('sort').order('sort', { ascending: false }).limit(1));
+  must(await c.from('tf_benchmark_defs').insert({ ...rest, sort: (top[0]?.sort || 0) + 1 }));
+}
+export async function deleteBenchDef(id) {
+  if (DEMO) { const s = demo(); s.portal.defs = s.portal.defs.filter((x) => x.id !== id); return dsave(s); }
+  const c = await client(); must(await c.from('tf_benchmark_defs').delete().eq('id', id));
+}
+/** Every result the signed-in member has logged, oldest first. */
+export async function benchLog() {
+  if (DEMO) return demo().portal.log.slice().sort((a, b) => a.day.localeCompare(b.day));
+  const c = await client();
+  return must(await c.from('tf_benchmark_log').select('id,name,value,day').eq('user_id', ME.user_id).order('day').order('created_at')).map((r) => ({ ...r, value: Number(r.value) }));
+}
+export async function addBenchEntry(name, value, day) {
+  if (DEMO) { const s = demo(); s.portal.log.push({ id: uid(), name, value, day }); return dsave(s); }
+  const c = await client(); must(await c.from('tf_benchmark_log').insert({ user_id: ME.user_id, name, value, day }));
+}
+export async function deleteBenchEntry(id) {
+  if (DEMO) { const s = demo(); s.portal.log = s.portal.log.filter((x) => x.id !== id); return dsave(s); }
+  const c = await client(); must(await c.from('tf_benchmark_log').delete().eq('id', id));
 }
 
 // ---------- Timetable and bookings ----------
