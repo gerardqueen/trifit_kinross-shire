@@ -91,7 +91,7 @@ async function boot() {
   if (ME.demo) $('#demo-banner').innerHTML = `Demo mode: you are looking at the ${esc(ME.role)} view. Nothing is saved outside this browser. Switch to ${['member', 'coach', 'admin'].filter((r) => r !== ME.role).map((r) => `<a href="?demo=${r}">${r}</a>`).join(' or ')}.`;
   $('#who').textContent = ME.demo ? '' : `${ME.name || ME.email} · ${ME.role}`;
   [TRACKS] = await Promise.all([db.tracks(), loadBench()]);
-  db.teamup('status').then((r) => { LINKED = !!r.linked; if (TAB === 'book' || TAB === 'account') openTab(TAB); });
+  db.teamup('status').then((r) => { LINKED = !!r.linked; if (['training', 'book', 'account'].includes(TAB)) openTab(TAB); });
   drawTabs(); openTab(TAB);
 }
 function showLogin(msg) { show('#login-view'); if (msg) { $('#l-error').textContent = msg; $('#l-error').hidden = false; } }
@@ -183,6 +183,7 @@ function drawTabs() {
 $('#tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) { EDIT = null; openTab(b.dataset.tab); } };
 function flash(msg) { const f = $('#flash'); f.textContent = msg; f.hidden = false; clearTimeout(flash.t); flash.t = setTimeout(() => (f.hidden = true), 5000); }
 async function openTab(k) {
+  if (k === 'book' && matchMedia('(max-width:900px)').matches) k = 'training';
   TAB = k; drawTabs();
   $('#hello').textContent = Object.fromEntries(tabList())[k];
   const pane = $('#pane'); if (!pane.children.length) pane.innerHTML = '<p class="hint">Loading…</p>';
@@ -197,11 +198,11 @@ function armed(btn) {
   return false;
 }
 const trackName = (id) => TRACKS.find((t) => t.id === id)?.name || 'Programme';
-function weekNav(ws) {
+function weekNav(ws, strip = true) {
   const days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(WEEK, i));
   return `<div class="weeknav"><button class="ib" data-week="-1" aria-label="Previous week">‹</button><b>Week of ${dayLabel(WEEK)}</b><button class="ib" data-week="1" aria-label="Next week">›</button>
     <button class="ib" data-week="0">This week</button></div>
-    <div class="daystrip">${days.map((d) => { const k = iso(d), n = ws.filter((w) => w.day === k).length; return `<button type="button" data-day="${k}" class="${n ? 'has' : ''}" aria-pressed="${k === DAY}"><b>${DAYS[(d.getDay() + 6) % 7].slice(0, 3)}</b><span>${d.getDate()}</span><em></em></button>`; }).join('')}</div>`;
+    ${!strip ? '' : `<div class="daystrip">${days.map((d) => { const k = iso(d), n = ws.filter((w) => w.day === k).length; return `<button type="button" data-day="${k}" class="${n ? 'has' : ''}" aria-pressed="${k === DAY}"><b>${DAYS[(d.getDay() + 6) % 7].slice(0, 3)}</b><span>${d.getDate()}</span><em></em></button>`; }).join('')}</div>`}`;
 }
 function wireWeek(redraw) {
   $$('[data-week]').forEach((b) => (b.onclick = () => { const n = +b.dataset.week; WEEK = n ? addDays(WEEK, 7 * n) : monday(); DAY = n ? iso(WEEK) : iso(new Date()); redraw(); }));
@@ -210,28 +211,63 @@ function wireWeek(redraw) {
 const inWeek = () => { if (DAY < iso(WEEK) || DAY > iso(addDays(WEEK, 6))) DAY = iso(WEEK); };
 
 // ---------- Training ----------
-let ASMEMBER = false;
+// ---------- Classes and booking (shared by the day view and the week calendar) ----------
+const nowHM = () => { const n = new Date(); return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`; };
+const finished = (dayIso, start) => dayIso < iso(new Date()) || (dayIso === iso(new Date()) && start <= nowHM());
+const classesOn = (cls, dayIso) => { const wd = ((parseDay(dayIso).getDay() + 6) % 7) + 1; return cls.filter((c) => c.day === wd); };
+const PREVIEW_NOTE = 'TeamUp is not linked yet, so a booking here is a preview and holds no place. Use TeamUp for a real booking until the gym switches the link on.';
+const bookState = (b) => (!b ? '' : b.status === 'booked' ? 'Booked' : b.status === 'failed' ? 'TeamUp did not accept this' : 'Preview booking');
+function classRow(c, dayIso, mine) {
+  const b = mine.find((x) => x.class_id === c.id && x.day === dayIso), past = finished(dayIso, c.start_time);
+  return `<div class="rw cl ${b ? 'mine' : ''} ${past ? 'off' : ''}" data-class="${esc(c.id)}" data-day="${dayIso}"><span class="cltime">${t12(c.start_time)}</span>
+    <div class="txt"><b>${esc(c.name)}${c.note ? ` <em class="pill">${esc(c.note)}</em>` : ''}</b><span>${esc([c.coach, bookState(b)].filter(Boolean).join(' · '))}</span></div>
+    <div class="acts">${past ? '<span class="hint">Finished</span>' : b ? '<button class="ib" data-cancel>Cancel</button>' : '<button class="btn sm" data-book>Book</button>'}</div></div>`;
+}
+function wireBooking(root, mine, redraw) {
+  if (!root) return;
+  root.onclick = async (e) => {
+    const el = e.target.closest('[data-class]'); if (!el) return;
+    try {
+      const bk = e.target.closest('[data-book]');
+      if (bk) { bk.disabled = true; await db.book(el.dataset.class, el.dataset.day, LINKED); flash(LINKED ? 'Booked.' : 'Preview booking saved. No place is held in TeamUp yet.'); return redraw(); }
+      if (e.target.closest('[data-cancel]')) { await db.cancelBooking(mine.find((x) => x.class_id === el.dataset.class && x.day === el.dataset.day), LINKED); return redraw(); }
+    } catch (ex) { flash(nice(ex.message)); redraw(); }
+  };
+}
+
+// ---------- Training: one day at a time ----------
+// The programme switch starts on the first programme (TRI FIT classes). Others, such as HYROX,
+// only show when chosen.
+let ASMEMBER = false, TRACKSEL = null;
+const pickTrack = (list) => (list.some((t) => t.id === TRACKSEL) ? TRACKSEL : (TRACKSEL = list[0]?.id || null));
+const progChips = (list, sel, inert) => (list.length < 2 ? '' : `<div class="pchips" role="group" aria-label="Programme" ${inert ? 'inert' : ''}>${list.map((t) => `<button type="button" class="pchip" data-prog="${esc(t.id)}" aria-pressed="${t.id === sel}">${esc(t.name)}</button>`).join('')}</div>`);
+const classList = (cls, dayIso, mine, inert) => { const rows = classesOn(cls, dayIso);
+  return `<h3 class="dayhead">Classes</h3><div class="rows classlist" ${inert ? 'inert' : ''}>${rows.length ? rows.map((c) => classRow(c, dayIso, mine)).join('') : '<p class="hint">No classes on this day.</p>'}</div>`; };
 async function trainingTab() {
   inWeek();
-  const asM = isStaff() && ASMEMBER;
-  const ws = (await db.workouts(iso(WEEK), iso(addDays(WEEK, 6)))).filter((w) => !asM || (w.published && TRACKS.find((t) => t.id === w.track_id)?.audience !== 'coaches'));
-  const today = ws.filter((w) => w.day === DAY);
+  const asM = isStaff() && ASMEMBER, from = iso(WEEK);
+  const [all, cls, mine] = await Promise.all([db.workouts(from, iso(addDays(WEEK, 6))), db.classes(), db.myBookings(from)]);
+  const tracks = TRACKS.filter((t) => !asM || t.audience !== 'coaches'), sel = pickTrack(tracks);
+  const ws = all.filter((w) => w.track_id === sel && (!asM || w.published)), today = ws.filter((w) => w.day === DAY);
   const boards = await Promise.all(today.map((w) => (w.tracked ? db.leaderboard(w.id) : [])));
   const cards = today.length ? today.map((w, i) => workoutCard(w, boards[i], { asMember: asM })).join('')
-    : `<p class="hint">Nothing programmed for this day${isStaff() && !asM ? '. Add a session from the Programming tab.' : ' yet.'}</p>`;
-  const toggle = isStaff() ? `<div class="formrow" style="justify-content:space-between;margin-bottom:12px"><h3 class="dayhead" style="margin:0">${dayLabel(parseDay(DAY), true)}</h3>
+    : `<p class="hint">Nothing programmed for ${esc(trackName(sel))} on this day${isStaff() && !asM ? '. Add a session from the Programming tab.' : ' yet.'}</p>`;
+  const classes = classList(cls, DAY, mine) + (LINKED ? '' : `<p class="hint">${PREVIEW_NOTE}</p>`);
+  const head = isStaff() ? `<div class="formrow" style="justify-content:space-between;margin-bottom:12px"><h3 class="dayhead" style="margin:0">${dayLabel(parseDay(DAY), true)}</h3>
       <button class="ib" id="as-member" aria-pressed="${asM}">${asM ? 'Back to coach view' : 'See this day as a member'}</button></div>` : `<h3 class="dayhead">${dayLabel(parseDay(DAY), true)}</h3>`;
-  $('#pane').innerHTML = weekNav(ws) + toggle + (asM
-    ? `<p class="hint" style="margin-bottom:12px">Member view on a phone: published sessions only, no coach notes, with your own PBs filling in the numbers.</p>${phone(cards, dayLabel(parseDay(DAY), true))}`
-    : today.length ? `<div class="wgrid">${cards}</div>` : cards);
+  $('#pane').innerHTML = weekNav(ws) + head + (asM
+    ? `<p class="hint" style="margin-bottom:12px">Member view on a phone: published sessions only, no coach notes, with your own PBs filling in the numbers.</p>${phone(progChips(tracks, sel) + cards + classes, dayLabel(parseDay(DAY), true))}`
+    : `${progChips(tracks, sel)}<div class="daycols"><div class="stackcol">${cards}</div><div class="stackcol">${classes}</div></div>`);
   wireWeek(trainingTab);
   if ($('#as-member')) $('#as-member').onclick = () => { ASMEMBER = !ASMEMBER; trainingTab(); };
+  $$('[data-prog]').forEach((b) => (b.onclick = () => { TRACKSEL = b.dataset.prog; trainingTab(); }));
+  wireBooking($('.classlist'), mine, trainingTab);
   today.forEach((w, i) => wireWorkout(w, boards[i]));
 }
 // A phone-sized frame showing what the app looks like to a member.
 function phone(inner, sub = '') {
   return `<div class="phone"><div class="phone-top"><img src="img/logo.png" alt=""><span><b>TRI FIT</b><small>${esc(sub)}</small></span></div><div class="phone-screen">${inner}</div>
-    <div class="phone-tabs" aria-hidden="true"><span class="on">Training</span><span>Book</span><span>PBs</span><span>Account</span></div></div>`;
+    <div class="phone-tabs" aria-hidden="true"><span class="on">Training</span><span>PBs</span><span>Account</span></div></div>`;
 }
 const SAMPLE_PBS = { 'Back Squat': 90, 'Front Squat': 75, 'Deadlift': 120, 'Clean & Jerk': 62.5, 'Snatch': 47.5, 'Strict Press': 42.5, 'Bench Press': 65, '2k Row': 470, '500m Row': 104, '5k Row': 1260, '1k Ski': 245, '1k Run': 275, '5k Run': 1560 };
 function rank(rows, type) {
@@ -283,7 +319,7 @@ function wireWorkout(w, board) {
 // ---------- Programming (coaches and admins) ----------
 async function programmingTab() {
   inWeek();
-  const ws = await db.workouts(iso(WEEK), iso(addDays(WEEK, 6))), editing = ws.find((w) => w.id === EDIT) || null;
+  const [ws, pcls] = await Promise.all([db.workouts(iso(WEEK), iso(addDays(WEEK, 6))), db.classes()]), editing = ws.find((w) => w.id === EDIT) || null;
   const w = editing || { day: DAY, track_id: TRACKS[0]?.id, title: '', body: '', notes: '', tracked: false, score_type: 'time', published: true };
   const tokens = DEFS.map((d) => `{80% ${d.name}${d.kind === 'time' && d.distance_m && d.distance_m !== 500 && /row|ski|bike|erg/i.test(d.name) ? ' /500m' : ''}}`);
   $('#pane').innerHTML = weekNav(ws) + `<div class="split three">
@@ -315,7 +351,8 @@ async function programmingTab() {
   const prev = () => {
     const as = $('#w-pv-as').value, pbs = as === 'me' ? PBS : as === 'sample' ? SAMPLE_PBS : {}, day = $('#w-day').value;
     const draft = { id: 'preview', track_id: $('#w-track').value, day, title: $('#w-title').value.trim() || 'Session title', body: body.value.trim() || 'Your session text appears here.', tracked: $('#w-tracked').checked, score_type: $('#w-type').value, published: true };
-    $('#w-prev').innerHTML = phone(`<h3 class="dayhead">${/^\d{4}-\d{2}-\d{2}$/.test(day) ? dayLabel(parseDay(day), true) : ''}</h3>` + workoutCard(draft, [], { asMember: true, pbs, inert: true }), 'Training');
+    const okDay = /^\d{4}-\d{2}-\d{2}$/.test(day), memberTracks = TRACKS.filter((t) => t.audience !== 'coaches');
+    $('#w-prev').innerHTML = phone(progChips(memberTracks, draft.track_id, true) + workoutCard(draft, [], { asMember: true, pbs, inert: true }) + (okDay ? classList(pcls, day, [], true) : ''), okDay ? dayLabel(parseDay(day), true) : 'Training');
   };
   const typeVis = () => ($('#w-type-field').hidden = !$('#w-tracked').checked);
   form.addEventListener('input', prev); form.addEventListener('change', () => { typeVis(); prev(); }); $('#w-pv-as').onchange = prev; typeVis(); prev();
@@ -343,23 +380,21 @@ async function programmingTab() {
   };
 }
 
-// ---------- Book ----------
+// ---------- Book: the week as a calendar (web layout) ----------
+// On a phone this tab is not shown: the Training day view carries that day's classes instead.
 async function bookTab() {
-  const today = new Date(), from = iso(today);
+  const from = iso(WEEK), todayIso = iso(new Date());
   const [cls, mine] = await Promise.all([db.classes(), db.myBookings(from)]);
-  const days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(today, i)), now = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
-  $('#pane').innerHTML = `<p class="banner">${LINKED ? 'Bookings here go straight into TeamUp.' : 'TeamUp is not linked yet, so bookings made here are a preview and no place is held. Use TeamUp for a real booking until the gym switches the link on.'}</p>
-    <div class="rows" style="max-width:820px">${days.map((d, i) => { const k = iso(d), wd = ((d.getDay() + 6) % 7) + 1, rows = cls.filter((c) => c.day === wd && (i > 0 || c.start_time > now));
-      return `<h3>${i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayLabel(d, true)}</h3>` + (rows.length ? rows.map((c) => { const b = mine.find((x) => x.class_id === c.id && x.day === k);
-        return `<div class="rw ${b ? 'editing' : ''}" data-class="${esc(c.id)}" data-day="${k}"><div class="txt"><b>${t12(c.start_time)} · ${esc(c.name)}</b><span>${esc([c.coach, c.note].filter(Boolean).join(' · '))}${b ? ` · ${b.status === 'booked' ? 'booked in TeamUp' : b.status === 'failed' ? 'TeamUp did not accept this' : 'preview booking'}` : ''}</span></div>
-          <div class="acts">${b ? '<button class="ib" data-cancel>Cancel</button>' : '<button class="btn sm" data-book>Book</button>'}</div></div>`; }).join('') : '<p class="hint">No classes.</p>'); }).join('')}</div>`;
-  $('.rows').onclick = async (e) => {
-    const rw = e.target.closest('.rw'); if (!rw) return;
-    try {
-      if (e.target.closest('[data-book]')) { e.target.disabled = true; await db.book(rw.dataset.class, rw.dataset.day, LINKED); flash(LINKED ? 'Booked.' : 'Preview booking saved. No place is held in TeamUp yet.'); return bookTab(); }
-      if (e.target.closest('[data-cancel]')) { await db.cancelBooking(mine.find((x) => x.class_id === rw.dataset.class && x.day === rw.dataset.day), LINKED); return bookTab(); }
-    } catch (ex) { flash(nice(ex.message)); bookTab(); }
-  };
+  const days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(WEEK, i)).filter((d, i) => i < 6 || cls.some((c) => c.day === 7));
+  const slot = (c, k) => { const b = mine.find((x) => x.class_id === c.id && x.day === k), past = finished(k, c.start_time);
+    return `<div class="slot ${b ? 'mine' : ''} ${past ? 'off' : ''}" data-class="${esc(c.id)}" data-day="${k}"><span class="t">${t12(c.start_time)}</span>
+      <span class="n">${esc(c.name)}${c.note ? ` <em>${esc(c.note)}</em>` : ''}</span><span class="c">${esc(c.coach || '')}</span>${b ? `<span class="st">${bookState(b)}</span>` : ''}
+      ${past ? '<span class="c">Finished</span>' : b ? '<button class="ib" data-cancel>Cancel</button>' : '<button class="btn sm" data-book>Book</button>'}</div>`; };
+  $('#pane').innerHTML = weekNav([], false) + (LINKED ? '' : `<p class="banner">${PREVIEW_NOTE}</p>`) +
+    `<div class="week cal" style="--cols:${days.length}">${days.map((d) => { const k = iso(d), rows = classesOn(cls, k);
+      return `<div class="day ${k === todayIso ? 'today' : ''}"><h3>${DAYS[(d.getDay() + 6) % 7].slice(0, 3)} ${d.getDate()}${k === todayIso ? ' · today' : ''}</h3>${rows.length ? rows.map((c) => slot(c, k)).join('') : '<p class="rest">No classes</p>'}</div>`; }).join('')}</div>`;
+  wireWeek(bookTab);
+  wireBooking($('.cal'), mine, bookTab);
 }
 
 // ---------- PBs ----------

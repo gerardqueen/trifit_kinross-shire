@@ -66,3 +66,8 @@ day as a member" does the same for a whole day.
 
 **PB history:** coaches add or remove tracked lifts and tests on the PBs tab. Members log dated
 results; the best is their PB, and each one shows the improvement since their first result.
+
+**Day view and booking:** Training shows one day at a time: the programme switch (it starts on
+the first programme; others such as HYROX show only when chosen), that day's programming, then
+that day's classes with Book buttons. On the web, the Book tab is a week calendar. On a phone
+there is no separate Book tab, because the day view already carries the classes.

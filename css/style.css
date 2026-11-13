@@ -319,3 +319,36 @@ textarea{resize:vertical;line-height:1.5}
 .split.three .rw{flex-wrap:wrap}
 .split.three .rw .txt{flex:1 1 150px}
 .split.three .rw .acts{margin-left:auto}
+
+/* day view: programme switch, programming, classes */
+.pchips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.pchip{border:1px solid #55555a;background:transparent;border-radius:999px;padding:9px 16px;font:600 15px/1 var(--cond);letter-spacing:1.2px;text-transform:uppercase;color:var(--mute)}
+.pchip[aria-pressed="true"]{background:var(--chalk);border-color:var(--chalk);color:#000}
+.daycols{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:22px;align-items:start}
+.stackcol{display:grid;gap:14px;align-content:start;min-width:0}
+.stackcol .dayhead{margin:0}
+.rw.cl{flex-wrap:nowrap}
+.rw.cl .cltime{font:700 18px/1 var(--cond);min-width:66px;font-variant-numeric:tabular-nums;flex:none}
+.rw.cl .acts{width:auto}
+.rw.mine{border-color:var(--ok)}
+.pill{font:600 11.5px/1 var(--cond);font-style:normal;letter-spacing:1px;text-transform:uppercase;border:1px solid #55555a;border-radius:5px;padding:1px 5px;color:var(--mute);white-space:nowrap}
+/* week calendar on the Book tab */
+.cal .slot .btn,.cal .slot .ib{width:100%;margin-top:4px}
+.cal .slot.mine{border-color:var(--ok)}
+.cal .slot.off{opacity:.5}
+.cal .slot .st{font:600 12.5px/1.2 var(--cond);letter-spacing:1px;text-transform:uppercase;color:var(--ok)}
+.cal .day.today h3{border-bottom-color:var(--gold);color:var(--text)}
+/* inside the phone preview everything stacks, as it does on a real phone */
+.phone-screen .daycols{grid-template-columns:minmax(0,1fr)}
+.phone-screen .pchips{margin:0}
+.phone-screen .pchip{padding:7px 12px;font-size:13px}
+.phone-screen .rw.cl{padding:9px 10px;gap:8px}
+.phone-screen .cltime{min-width:56px;font-size:16px}
+.phone-tabs{grid-template-columns:repeat(3,1fr)}
+@media (max-width:900px){
+  .daycols{grid-template-columns:minmax(0,1fr)}
+  .tabs [data-tab=book]{display:none}
+  .week.cal{grid-template-columns:minmax(0,1fr)}
+  .week.cal .day{display:grid}
+  .week.cal .day h3{display:block}
+}
