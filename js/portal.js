@@ -186,7 +186,31 @@ export async function myBookings(from) {
   const c = await client(); return must(await c.from('tf_bookings').select('*').eq('user_id', ME.user_id).gte('day', from));
 }
 /** TeamUp link: asks the server function. {linked:false} until the gym's TeamUp token is added. */
+// Demo with &teamup added to the address pretends TeamUp is linked, with made-up spaces, so the
+// live booking screens can be seen before the gym's token exists.
+const DEMO_TU = DEMO && new URLSearchParams(location.search).has('teamup');
+function demoTeamup(action, p) {
+  const s = demo(); s.portal.tu = s.portal.tu || [];
+  if (action === 'status') return { linked: true };
+  if (action === 'sync') return { linked: true, ok: true, active: true, message: 'Membership found: Unlimited monthly membership (demo).' };
+  if (action === 'timetable') {
+    const events = [];
+    for (let d = new Date(p.from + 'T12:00:00'); iso(d) <= p.to; d.setDate(d.getDate() + 1)) {
+      const k = iso(d), wd = ((d.getDay() + 6) % 7) + 1;
+      for (const c of s.classes.filter((x) => x.day === wd)) {
+        const id = `${c.id}-${k}`, cap = /HYROX/i.test(c.name) ? 18 : 16, base = (c.start_time.charCodeAt(1) * 7 + d.getDate() * 3) % (cap + 1);
+        const mine = s.portal.tu.includes(id);
+        events.push({ id, day: k, time: c.start_time, name: c.name, coach: c.coach, capacity: cap, booked: Math.min(cap, base + (mine ? 1 : 0)), mine, waitlisted: false });
+      }
+    }
+    return { linked: true, ok: true, matched: true, events };
+  }
+  if (action === 'book') { s.portal.tu.push(p.event_id); dsave(s); return { ok: true }; }
+  if (action === 'cancel') { s.portal.tu = s.portal.tu.filter((x) => x !== p.event_id); dsave(s); return { ok: true }; }
+  return { ok: false, error: 'Unknown action.' };
+}
 export async function teamup(action, payload = {}) {
+  if (DEMO_TU) return demoTeamup(action, payload);
   if (DEMO) return { linked: false };
   try {
     const c = await client();
@@ -195,16 +219,19 @@ export async function teamup(action, payload = {}) {
     return data || { linked: false };
   } catch (e) { return { linked: false, error: e.message }; }
 }
-export async function book(classId, day, linked) {
+/** Preview booking, used until TeamUp is linked. It is saved here and holds no place. */
+export async function book(classId, day) {
   if (DEMO) { const s = demo(); s.portal.bookings.push({ id: uid(), class_id: classId, day, status: 'preview' }); return dsave(s); }
-  if (linked) { const r = await teamup('book', { class_id: classId, day }); if (!r.ok) throw new Error(r.error || 'TeamUp did not accept the booking.'); return; }
   const c = await client(); must(await c.from('tf_bookings').insert({ user_id: ME.user_id, class_id: classId, day }));
 }
-export async function cancelBooking(b, linked) {
-  if (DEMO) { const s = demo(); s.portal.bookings = s.portal.bookings.filter((x) => x.id !== b.id); return dsave(s); }
-  if (linked && b.status === 'booked') { const r = await teamup('cancel', { booking_id: b.id }); if (!r.ok) throw new Error(r.error || 'TeamUp did not cancel the booking.'); return; }
-  const c = await client(); must(await c.from('tf_bookings').delete().eq('id', b.id));
+export async function cancelBooking(id) {
+  if (DEMO) { const s = demo(); s.portal.bookings = s.portal.bookings.filter((x) => x.id !== id); return dsave(s); }
+  const c = await client(); must(await c.from('tf_bookings').delete().eq('id', id));
 }
+/** Live classes from TeamUp between two dates, with spaces and whether this member is booked. */
+export const liveTimetable = (from, to) => teamup('timetable', { from, to });
+export async function bookEvent(eventId) { const r = await teamup('book', { event_id: eventId }); if (!r.ok) throw new Error(r.error || 'TeamUp did not accept the booking.'); }
+export async function cancelEvent(eventId) { const r = await teamup('cancel', { event_id: eventId }); if (!r.ok) throw new Error(r.error || 'TeamUp did not cancel the booking.'); }
 
 // ---------- Admin: people ----------
 export async function people() {

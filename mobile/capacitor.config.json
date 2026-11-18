@@ -1,0 +1,10 @@
+{
+  "appId": "com.trifitkinross.app",
+  "appName": "TRI FIT",
+  "webDir": "www",
+  "backgroundColor": "#0c0c0d",
+  "ios": {
+    "backgroundColor": "#0c0c0d",
+    "contentInset": "never"
+  }
+}

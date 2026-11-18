@@ -1,0 +1,59 @@
+# TRI FIT members app: iPhone build to TestFlight on Codemagic.
+# Same signing and upload steps as the No Rule Nutrition app, run from the mobile/ folder.
+# Start builds by hand in Codemagic (no automatic trigger, so website changes don't use build minutes).
+#
+# Needs, in this Codemagic app's environment variables, a group called app_store_connect with:
+#   APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_IDENTIFIER, APP_STORE_CONNECT_PRIVATE_KEY
+# (the same App Store Connect API key the No Rule Nutrition app uses).
+# And in App Store Connect: an app record for bundle ID com.trifitkinross.app.
+workflows:
+  trifit-ios:
+    name: TRI FIT iOS to TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      groups:
+        - app_store_connect
+      vars:
+        XCODE_PROJECT: "mobile/ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.trifitkinross.app"
+        MARKETING_VERSION: "1.0.0"
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Install npm dependencies
+        script: cd mobile && npm ci
+      - name: Build the app from the members page and sync Capacitor
+        script: cd mobile && npm run build && npx cap sync ios
+      - name: Write API key file
+        script: |
+          mkdir -p "$CM_BUILD_DIR/private_keys"
+          echo "$APP_STORE_CONNECT_PRIVATE_KEY" > "$CM_BUILD_DIR/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_IDENTIFIER}.p8"
+      - name: Set up code signing
+        script: |
+          keychain initialize
+          openssl genrsa -out /tmp/cert_private_key.pem 2048
+          export CERTIFICATE_PRIVATE_KEY="$(cat /tmp/cert_private_key.pem)"
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles --project "$XCODE_PROJECT"
+      - name: Set version and build number
+        script: |
+          cd mobile/ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
+          agvtool new-marketing-version "$MARKETING_VERSION"
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+      - name: Upload to App Store Connect (appears in TestFlight)
+        script: |
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$(find "$CM_BUILD_DIR/build/ios/ipa" -name '*.ipa' | head -1)" \
+            --apiKey "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+    artifacts:
+      - build/ios/ipa/*.ipa

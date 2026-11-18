@@ -352,3 +352,29 @@ textarea{resize:vertical;line-height:1.5}
   .week.cal .day{display:grid}
   .week.cal .day h3{display:block}
 }
+
+/* quiet staff login in the landing page footer */
+.foot-links a.quiet{opacity:.55;font-size:13px}
+
+/* percentage picker in the session editor */
+.tokrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tokrow select{width:auto;flex:1 1 200px;padding:9px 10px;font-size:15px}
+.tokpct{display:flex;align-items:center;gap:6px;font:600 15px/1 var(--cond);color:var(--mute)}
+.tokpct input{width:78px !important;padding:9px 10px !important;font-size:15px !important;text-align:right}
+.cal .slot .st.plain{color:var(--mute)}
+
+/* ---------- app mode: the iPhone/Android app, or ?app on the members page ---------- */
+.appmode body{-webkit-tap-highlight-color:transparent}
+.appmode .head{padding-top:env(safe-area-inset-top)}
+.appmode .wrap{max-width:640px}
+.appmode .admin{padding-top:16px;padding-bottom:calc(104px + env(safe-area-inset-bottom))}
+.appmode #hello{font-size:22px}
+.appmode .tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;padding:8px 12px calc(10px + env(safe-area-inset-bottom));background:#101011;border-top:1px solid var(--line);display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:8px;overflow:visible}
+.appmode .tabs button{border:0;border-radius:10px;padding:12px 4px;font-size:14px}
+.appmode .daycols{grid-template-columns:minmax(0,1fr)}
+.appmode .daystrip{gap:4px}
+.appmode .daystrip button{padding:8px 0 6px}
+.appmode .weeknav b{min-width:0;flex:1}
+.appmode .login{margin-top:12px}
+/* long coach names and states shrink with an ellipsis instead of widening the page */
+.rows,.stackcol{grid-template-columns:minmax(0,1fr)}

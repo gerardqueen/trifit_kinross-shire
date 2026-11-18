@@ -1,12 +1,14 @@
 // Data layer. The public page reads with plain fetch (no library to download); the admin page
 // loads supabase-js on demand for sign-in, edits and photo uploads. In demo mode everything
 // lives in this browser's localStorage instead.
-import { SUPABASE_URL, SUPABASE_ANON_KEY as KEY, DEMO } from './config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY as KEY, DEMO, WEB_APP_URL } from './config.js';
 import { DEFAULTS } from './defaults.js';
 
 export { DEMO };
 export const TABLES = { coaches: 'tf_coaches', classes: 'tf_classes', memberships: 'tf_memberships', programming: 'tf_programming' };
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}` };
+// Where emailed links come back to: this page on the website, or the website's members page from the app.
+const backTo = () => (/^https?:$/.test(location.protocol) ? location.origin + location.pathname : WEB_APP_URL);
 export const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
 export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 const byOrder = (name) => (a, b) => name === 'classes'
@@ -83,14 +85,14 @@ export async function currentAdmin() {
 export async function signIn(email, password) { const c = await client(); must(await c.auth.signInWithPassword({ email, password })); }
 export async function signUp(email, password) {
   const c = await client();
-  const d = must(await c.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }));
+  const d = must(await c.auth.signUp({ email, password, options: { emailRedirectTo: backTo() } }));
   return { needsConfirm: !d.session };
 }
 export async function signOut() { const c = await client(); if (c) await c.auth.signOut(); }
 /** Emails a reset link that brings the admin back to this page to choose a new password. */
 export async function requestPasswordReset(email) {
   const c = await client(); if (!c) return;
-  must(await c.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }));
+  must(await c.auth.resetPasswordForEmail(email, { redirectTo: backTo() }));
 }
 export async function updatePassword(password) { const c = await client(); if (!c) return; must(await c.auth.updateUser({ password })); }
 export async function onPasswordRecovery(cb) {

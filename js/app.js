@@ -4,6 +4,9 @@
 import * as auth from './data.js';
 import * as db from './portal.js';
 import { DAYS } from './defaults.js';
+import { APP } from './config.js';
+
+if (APP) document.documentElement.classList.add('appmode');
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -15,7 +18,9 @@ const dayLabel = (d, long) => d.toLocaleDateString('en-GB', long ? { weekday: 'l
 const SETUP_MSG = "The members area isn't switched on yet: supabase/002_portal.sql still needs to be run.";
 const nice = (m) => (/schema cache|does not exist|Could not find the (table|function)/i.test(m || '') ? SETUP_MSG : (m || 'Something went wrong'));
 let ME = null, TRACKS = [], PBS = {}, LINKED = false, DEFS = [], LOG = [], BENCH = {};
-const isStaff = () => ME.role === 'admin' || ME.role === 'coach';
+// In the app everyone, coaches and admins included, gets the member view: programming and admin
+// tools stay on the website.
+const isStaff = () => !APP && (ME.role === 'admin' || ME.role === 'coach');
 
 // ---------- Benchmarks and the percentage engine ----------
 // A lift percentage is a straight share of the 1 rep max, rounded to the nearest 2.5kg.
@@ -73,6 +78,7 @@ function readScore(type, form) {
 // ---------- Sign in ----------
 const authHash = new URLSearchParams(location.hash.slice(1));
 const arrivedFromReset = authHash.get('type') === 'recovery';
+const CONFIRMED = authHash.get('type') === 'signup' && !APP;
 const linkError = authHash.get('error_description');
 let mode = 'signin', inRecovery = false;
 const views = ['#login-view', '#reset-view', '#wait-view', '#app-view'];
@@ -86,29 +92,44 @@ async function boot() {
   $('#signout').hidden = !!ME.demo; $('#signout').onclick = signOut;
   if (ME.status !== 'active') return showWait();
   show('#app-view');
-  $('#site-link').hidden = ME.role !== 'admin'; if (ME.demo) $('#site-link').href = 'admin.html?demo';
+  $('#site-link').hidden = APP || ME.role !== 'admin'; if (ME.demo) $('#site-link').href = 'admin.html?demo';
   $('#demo-banner').hidden = !ME.demo;
   if (ME.demo) $('#demo-banner').innerHTML = `Demo mode: you are looking at the ${esc(ME.role)} view. Nothing is saved outside this browser. Switch to ${['member', 'coach', 'admin'].filter((r) => r !== ME.role).map((r) => `<a href="?demo=${r}">${r}</a>`).join(' or ')}.`;
-  $('#who').textContent = ME.demo ? '' : `${ME.name || ME.email} · ${ME.role}`;
+  $('#who').textContent = ME.demo ? '' : APP ? (ME.name || ME.email) : `${ME.name || ME.email} · ${ME.role}`;
+  if (APP) $('.head .brand')?.removeAttribute('href');
   [TRACKS] = await Promise.all([db.tracks(), loadBench()]);
-  db.teamup('status').then((r) => { LINKED = !!r.linked; if (['training', 'book', 'account'].includes(TAB)) openTab(TAB); });
+  db.teamup('status').then((r) => {
+    LINKED = !!r.linked;
+    if (['training', 'book', 'account'].includes(TAB)) openTab(TAB);
+    // Keep the membership shown on the Account tab fresh: check TeamUp once a day.
+    if (LINKED && !ME.demo && (!ME.teamup_checked_at || Date.now() - new Date(ME.teamup_checked_at).getTime() > 864e5))
+      db.teamup('sync').then(() => db.me()).then((m) => { if (m) ME = m; }).catch(() => {});
+  });
   drawTabs(); openTab(TAB);
+  if (CONFIRMED) flash('Email confirmed. If you signed up in the TRI FIT app, go back to the app and sign in.');
 }
 function showLogin(msg) { show('#login-view'); if (msg) { $('#l-error').textContent = msg; $('#l-error').hidden = false; } }
+let AUTO_SYNCED = false;
 async function showWait() {
   show('#wait-view');
   const blocked = ME.status === 'blocked';
   $('#wt-title').textContent = blocked ? 'Account paused' : 'Nearly there';
-  $('#wt-text').textContent = blocked ? 'This account has been paused. Please speak to the gym.'
-    : `You are signed in as ${ME.email}. Your account is waiting for TRI FIT to switch it on. You will be able to see the programming and book classes as soon as that is done.`;
   $('#wt-signout').onclick = signOut;
   const st = blocked ? { linked: false } : await db.teamup('status');
+  $('#wt-text').textContent = blocked ? 'This account has been paused. Please speak to the gym.'
+    : st.linked ? `You are signed in as ${ME.email}. If this is the email on your TRI FIT TeamUp account, your membership is found and your account switched on automatically.`
+    : `You are signed in as ${ME.email}. Your account is waiting for TRI FIT to switch it on. You will be able to see the programming and book classes as soon as that is done.`;
+  if (CONFIRMED) $('#wt-text').textContent = 'Email confirmed. ' + $('#wt-text').textContent;
   $('#wt-check').hidden = !st.linked;
-  $('#wt-check').onclick = async () => {
-    $('#wt-check').disabled = true; const r = await db.teamup('sync'); $('#wt-check').disabled = false;
+  const msg = (t) => { $('#wt-msg').textContent = t; $('#wt-msg').hidden = !t; };
+  const check = async () => {
+    $('#wt-check').disabled = true; msg('Checking TeamUp…');
+    const r = await db.teamup('sync'); $('#wt-check').disabled = false;
     if (r.active) return boot();
-    $('#wt-msg').textContent = r.message || 'We could not find an active TeamUp membership for this email.'; $('#wt-msg').hidden = false;
+    msg(r.message || r.error || 'We could not find an active TeamUp membership for this email.');
   };
+  $('#wt-check').onclick = check;
+  if (st.linked && !AUTO_SYNCED) { AUTO_SYNCED = true; check(); }
 }
 async function showReset() {
   inRecovery = true; show('#reset-view');
@@ -163,7 +184,7 @@ $('#reset-form').addEventListener('submit', async (e) => {
   if (p1.length < 8) { err.textContent = 'Password must be at least 8 characters.'; err.hidden = false; return; }
   if (p1 !== p2) { err.textContent = "The two passwords don't match."; err.hidden = false; return; }
   const btn = $('#r-submit'); btn.disabled = true;
-  try { await auth.updatePassword(p1); inRecovery = false; await boot(); flash('Password updated. You are signed in.'); }
+  try { await auth.updatePassword(p1); inRecovery = false; await boot(); flash('Password updated. You are signed in, and you can use the new password in the TRI FIT app too.'); }
   catch (ex) { err.textContent = /same|different/i.test(ex.message || '') ? 'Choose a password different from your old one.' : /session|expired|jwt/i.test(ex.message || '') ? 'This reset link has expired. Go back to the login page and request a new one.' : (ex.message || 'Could not save the new password.'); err.hidden = false; }
   finally { btn.disabled = false; }
 });
@@ -171,9 +192,9 @@ $('#reset-form').addEventListener('submit', async (e) => {
 // ---------- Tabs ----------
 let TAB = 'training', WEEK = monday(), DAY = iso(new Date()), EDIT = null, PENDING = 0;
 function tabList() {
-  const t = [['training', 'Training'], ['book', 'Book'], ['pbs', 'PBs']];
+  const t = [['training', 'Training'], ...(APP ? [] : [['book', 'Book']]), ['pbs', 'PBs']];
   if (isStaff()) t.push(['programming', 'Programming']);
-  if (ME.role === 'admin') t.push(['people', 'People'], ['programmes', 'Programmes']);
+  if (!APP && ME.role === 'admin') t.push(['people', 'People'], ['programmes', 'Programmes']);
   t.push(['account', 'Account']);
   return t;
 }
@@ -182,8 +203,11 @@ function drawTabs() {
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) { EDIT = null; openTab(b.dataset.tab); } };
 function flash(msg) { const f = $('#flash'); f.textContent = msg; f.hidden = false; clearTimeout(flash.t); flash.t = setTimeout(() => (f.hidden = true), 5000); }
+// Each draw takes a number; a slower, older draw that finishes late is dropped.
+let GEN = 0;
 async function openTab(k) {
-  if (k === 'book' && matchMedia('(max-width:900px)').matches) k = 'training';
+  GEN++;
+  if (k === 'book' && (APP || matchMedia('(max-width:900px)').matches)) k = 'training';
   TAB = k; drawTabs();
   $('#hello').textContent = Object.fromEntries(tabList())[k];
   const pane = $('#pane'); if (!pane.children.length) pane.innerHTML = '<p class="hint">Loading…</p>';
@@ -204,7 +228,8 @@ function weekNav(ws, strip = true) {
     <button class="ib" data-week="0">This week</button></div>
     ${!strip ? '' : `<div class="daystrip">${days.map((d) => { const k = iso(d), n = ws.filter((w) => w.day === k).length; return `<button type="button" data-day="${k}" class="${n ? 'has' : ''}" aria-pressed="${k === DAY}"><b>${DAYS[(d.getDay() + 6) % 7].slice(0, 3)}</b><span>${d.getDate()}</span><em></em></button>`; }).join('')}</div>`}`;
 }
-function wireWeek(redraw) {
+function wireWeek(redraw0) {
+  const redraw = () => { GEN++; return redraw0(); };
   $$('[data-week]').forEach((b) => (b.onclick = () => { const n = +b.dataset.week; WEEK = n ? addDays(WEEK, 7 * n) : monday(); DAY = n ? iso(WEEK) : iso(new Date()); redraw(); }));
   $$('[data-day]').forEach((b) => (b.onclick = () => { DAY = b.dataset.day; redraw(); }));
 }
@@ -216,22 +241,61 @@ const nowHM = () => { const n = new Date(); return `${String(n.getHours()).padSt
 const finished = (dayIso, start) => dayIso < iso(new Date()) || (dayIso === iso(new Date()) && start <= nowHM());
 const classesOn = (cls, dayIso) => { const wd = ((parseDay(dayIso).getDay() + 6) % 7) + 1; return cls.filter((c) => c.day === wd); };
 const PREVIEW_NOTE = 'TeamUp is not linked yet, so a booking here is a preview and holds no place. Use TeamUp for a real booking until the gym switches the link on.';
-const bookState = (b) => (!b ? '' : b.status === 'booked' ? 'Booked' : b.status === 'failed' ? 'TeamUp did not accept this' : 'Preview booking');
-function classRow(c, dayIso, mine) {
-  const b = mine.find((x) => x.class_id === c.id && x.day === dayIso), past = finished(dayIso, c.start_time);
-  return `<div class="rw cl ${b ? 'mine' : ''} ${past ? 'off' : ''}" data-class="${esc(c.id)}" data-day="${dayIso}"><span class="cltime">${t12(c.start_time)}</span>
-    <div class="txt"><b>${esc(c.name)}${c.note ? ` <em class="pill">${esc(c.note)}</em>` : ''}</b><span>${esc([c.coach, bookState(b)].filter(Boolean).join(' · '))}</span></div>
-    <div class="acts">${past ? '<span class="hint">Finished</span>' : b ? '<button class="ib" data-cancel>Cancel</button>' : '<button class="btn sm" data-book>Book</button>'}</div></div>`;
+// When TeamUp is linked, classes, spaces and the member's own bookings come live from TeamUp and
+// booking goes straight into it. Until then the timetable from the website is shown and a booking
+// is a preview. Rows look the same either way.
+let TT = { key: '', at: 0, data: null }, TT_NOTE = '';
+const dropTT = () => { TT = { key: '', at: 0, data: null }; };
+const staticRows = (cls, from, to, mine = []) => {
+  const rows = [];
+  for (let d = parseDay(from); iso(d) <= to; d = addDays(d, 1)) {
+    const k = iso(d);
+    for (const c of classesOn(cls, k)) {
+      const b = mine.find((x) => x.class_id === c.id && x.day === k);
+      rows.push({ key: c.id + '|' + k, cls: c.id, booking: b?.id || '', day: k, start_time: c.start_time, name: c.name, coach: c.coach || '', note: c.note || '', mine: b ? 'preview' : '' });
+    }
+  }
+  return rows;
+};
+async function timetable(from, to) {
+  const key = `${LINKED}|${from}|${to}`;
+  if (TT.key === key && Date.now() - TT.at < 60000) return TT.data;
+  let data = null; TT_NOTE = '';
+  if (LINKED) {
+    const r = await db.liveTimetable(from, to);
+    if (r.ok && Array.isArray(r.events)) data = { live: true, matched: r.matched !== false, rows: r.events.map((e) => ({ key: 'e' + e.id, event: String(e.id), day: e.day, start_time: e.time, name: e.name, coach: e.coach || '', note: e.note || '', capacity: e.capacity ?? null, booked: e.booked ?? null, mine: e.mine ? 'booked' : e.waitlisted ? 'waitlist' : '' })) };
+    else TT_NOTE = `Live classes could not be loaded from TeamUp${r.error ? ` (${r.error})` : ''}, so the usual timetable is shown and bookings here are previews.`;
+  }
+  if (!data) { const [cls, mine] = await Promise.all([db.classes(), db.myBookings(from)]); data = { live: false, rows: staticRows(cls, from, to, mine) }; }
+  TT = { key, at: Date.now(), data };
+  return data;
 }
-function wireBooking(root, mine, redraw) {
+const ttNote = (tt) => (tt.live ? (tt.matched ? '' : 'Your email is not matched to a TeamUp account yet, so booking will not work. Check your membership on the Account tab.') : TT_NOTE || PREVIEW_NOTE);
+const full = (r) => r.capacity != null && r.booked != null && r.booked >= r.capacity;
+const spaces = (r) => (r.capacity == null || r.booked == null ? '' : full(r) ? 'Full' : `${r.capacity - r.booked} space${r.capacity - r.booked === 1 ? '' : 's'} left`);
+const stateText = (r) => ({ booked: 'Booked', waitlist: 'On the waitlist', preview: 'Preview booking' }[r.mine] || (finished(r.day, r.start_time) ? '' : spaces(r)));
+const rowActions = (r) => (finished(r.day, r.start_time) ? '<span class="hint">Finished</span>'
+  : r.mine ? '<button class="ib" data-cancel>Cancel</button>'
+  : full(r) ? '<button class="ib" disabled>Full</button>'
+  : '<button class="btn sm" data-book>Book</button>');
+function classRow(r) {
+  return `<div class="rw cl ${r.mine ? 'mine' : ''} ${finished(r.day, r.start_time) ? 'off' : ''}" data-key="${esc(r.key)}"><span class="cltime">${t12(r.start_time)}</span>
+    <div class="txt"><b>${esc(r.name)}${r.note ? ` <em class="pill">${esc(r.note)}</em>` : ''}</b><span>${esc([r.coach, stateText(r)].filter(Boolean).join(' · '))}</span></div>
+    <div class="acts">${rowActions(r)}</div></div>`;
+}
+function wireBooking(root, tt, redraw) {
   if (!root) return;
   root.onclick = async (e) => {
-    const el = e.target.closest('[data-class]'); if (!el) return;
+    const bk = e.target.closest('[data-book]'), cx = e.target.closest('[data-cancel]'), el = e.target.closest('[data-key]');
+    if ((!bk && !cx) || !el) return;
+    const r = tt.rows.find((x) => x.key === el.dataset.key); if (!r) return;
+    (bk || cx).disabled = true;
     try {
-      const bk = e.target.closest('[data-book]');
-      if (bk) { bk.disabled = true; await db.book(el.dataset.class, el.dataset.day, LINKED); flash(LINKED ? 'Booked.' : 'Preview booking saved. No place is held in TeamUp yet.'); return redraw(); }
-      if (e.target.closest('[data-cancel]')) { await db.cancelBooking(mine.find((x) => x.class_id === el.dataset.class && x.day === el.dataset.day), LINKED); return redraw(); }
-    } catch (ex) { flash(nice(ex.message)); redraw(); }
+      if (r.event) { await (bk ? db.bookEvent(r.event) : db.cancelEvent(r.event)); flash(bk ? 'Booked. It is in TeamUp too.' : 'Booking cancelled in TeamUp.'); }
+      else if (bk) { await db.book(r.cls, r.day); flash('Preview booking saved. No place is held in TeamUp yet.'); }
+      else await db.cancelBooking(r.booking);
+    } catch (ex) { flash(nice(ex.message)); }
+    dropTT(); GEN++; redraw();
   };
 }
 
@@ -241,18 +305,19 @@ function wireBooking(root, mine, redraw) {
 let ASMEMBER = false, TRACKSEL = null;
 const pickTrack = (list) => (list.some((t) => t.id === TRACKSEL) ? TRACKSEL : (TRACKSEL = list[0]?.id || null));
 const progChips = (list, sel, inert) => (list.length < 2 ? '' : `<div class="pchips" role="group" aria-label="Programme" ${inert ? 'inert' : ''}>${list.map((t) => `<button type="button" class="pchip" data-prog="${esc(t.id)}" aria-pressed="${t.id === sel}">${esc(t.name)}</button>`).join('')}</div>`);
-const classList = (cls, dayIso, mine, inert) => { const rows = classesOn(cls, dayIso);
-  return `<h3 class="dayhead">Classes</h3><div class="rows classlist" ${inert ? 'inert' : ''}>${rows.length ? rows.map((c) => classRow(c, dayIso, mine)).join('') : '<p class="hint">No classes on this day.</p>'}</div>`; };
+const classList = (rows, inert) => `<h3 class="dayhead">Classes</h3><div class="rows classlist" ${inert ? 'inert' : ''}>${rows.length ? rows.map(classRow).join('') : '<p class="hint">No classes on this day.</p>'}</div>`;
 async function trainingTab() {
   inWeek();
-  const asM = isStaff() && ASMEMBER, from = iso(WEEK);
-  const [all, cls, mine] = await Promise.all([db.workouts(from, iso(addDays(WEEK, 6))), db.classes(), db.myBookings(from)]);
-  const tracks = TRACKS.filter((t) => !asM || t.audience !== 'coaches'), sel = pickTrack(tracks);
-  const ws = all.filter((w) => w.track_id === sel && (!asM || w.published)), today = ws.filter((w) => w.day === DAY);
+  const g = GEN, asM = isStaff() && ASMEMBER, mv = APP || asM, from = iso(WEEK), to = iso(addDays(WEEK, 6));
+  const [all, tt] = await Promise.all([db.workouts(from, to), timetable(from, to)]);
+  if (g !== GEN) return;
+  const tracks = TRACKS.filter((t) => !mv || t.audience !== 'coaches'), sel = pickTrack(tracks);
+  const ws = all.filter((w) => w.track_id === sel && (!mv || w.published)), today = ws.filter((w) => w.day === DAY);
   const boards = await Promise.all(today.map((w) => (w.tracked ? db.leaderboard(w.id) : [])));
-  const cards = today.length ? today.map((w, i) => workoutCard(w, boards[i], { asMember: asM })).join('')
+  if (g !== GEN) return;
+  const cards = today.length ? today.map((w, i) => workoutCard(w, boards[i], { asMember: mv })).join('')
     : `<p class="hint">Nothing programmed for ${esc(trackName(sel))} on this day${isStaff() && !asM ? '. Add a session from the Programming tab.' : ' yet.'}</p>`;
-  const classes = classList(cls, DAY, mine) + (LINKED ? '' : `<p class="hint">${PREVIEW_NOTE}</p>`);
+  const note = ttNote(tt), classes = classList(tt.rows.filter((r) => r.day === DAY)) + (note ? `<p class="hint">${esc(note)}</p>` : '');
   const head = isStaff() ? `<div class="formrow" style="justify-content:space-between;margin-bottom:12px"><h3 class="dayhead" style="margin:0">${dayLabel(parseDay(DAY), true)}</h3>
       <button class="ib" id="as-member" aria-pressed="${asM}">${asM ? 'Back to coach view' : 'See this day as a member'}</button></div>` : `<h3 class="dayhead">${dayLabel(parseDay(DAY), true)}</h3>`;
   $('#pane').innerHTML = weekNav(ws) + head + (asM
@@ -261,7 +326,7 @@ async function trainingTab() {
   wireWeek(trainingTab);
   if ($('#as-member')) $('#as-member').onclick = () => { ASMEMBER = !ASMEMBER; trainingTab(); };
   $$('[data-prog]').forEach((b) => (b.onclick = () => { TRACKSEL = b.dataset.prog; trainingTab(); }));
-  wireBooking($('.classlist'), mine, trainingTab);
+  wireBooking($('.classlist'), tt, trainingTab);
   today.forEach((w, i) => wireWorkout(w, boards[i]));
 }
 // A phone-sized frame showing what the app looks like to a member.
@@ -321,7 +386,6 @@ async function programmingTab() {
   inWeek();
   const [ws, pcls] = await Promise.all([db.workouts(iso(WEEK), iso(addDays(WEEK, 6))), db.classes()]), editing = ws.find((w) => w.id === EDIT) || null;
   const w = editing || { day: DAY, track_id: TRACKS[0]?.id, title: '', body: '', notes: '', tracked: false, score_type: 'time', published: true };
-  const tokens = DEFS.map((d) => `{80% ${d.name}${d.kind === 'time' && d.distance_m && d.distance_m !== 500 && /row|ski|bike|erg/i.test(d.name) ? ' /500m' : ''}}`);
   $('#pane').innerHTML = weekNav(ws) + `<div class="split three">
     <div class="rows">${ws.length ? [...new Set(ws.map((x) => x.day))].map((d) => `<h3>${dayLabel(parseDay(d), true)}</h3>` + ws.filter((x) => x.day === d).map((x) => `<div class="rw ${x.published ? '' : 'off'} ${editing?.id === x.id ? 'editing' : ''}" data-id="${esc(x.id)}">
         <div class="txt"><b>${esc(x.title)}</b><span>${esc(trackName(x.track_id))}${x.tracked ? ' · tracked' : ''}${x.published ? '' : ' · draft'}</span></div>
@@ -333,7 +397,11 @@ async function programmingTab() {
         <div class="field"><label for="w-track">Programme</label><select id="w-track">${TRACKS.map((t) => `<option value="${esc(t.id)}" ${t.id === w.track_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div></div>
       <div class="field"><label for="w-title">Title</label><input id="w-title" maxlength="100" value="${esc(w.title)}" required></div>
       <div class="field"><label for="w-body">Session</label><textarea id="w-body" rows="7" maxlength="4000" placeholder="A. Back squat 5 x 3 @ {80% Back Squat}">${esc(w.body)}</textarea>
-        <div class="chips">${tokens.map((t) => `<button type="button" class="chip" data-tok="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        <div class="tokrow" role="group" aria-label="Add a load or pace from a PB">
+          <select id="tok-name" aria-label="Lift or test"><option value="">Add a load or pace…</option>${Object.entries(KIND).map(([k, l]) => { const ds = DEFS.filter((d) => d.kind === k); return ds.length ? `<optgroup label="${l}">${ds.map((d) => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('')}</optgroup>` : ''; }).join('')}</select>
+          <label class="tokpct"><input id="tok-pct" type="number" inputmode="decimal" min="1" max="150" step="0.5" value="80" aria-label="Percentage"><span>%</span></label>
+          <select id="tok-per" aria-label="Show as" hidden><option value="">As a total time</option><option value="500">As a pace per 500m</option><option value="1000">As a pace per km</option></select>
+          <button type="button" class="btn sm" id="tok-add" disabled>Insert</button></div>
         <p class="hint">Percentages in curly brackets turn into each member's own load, reps or split from their PBs. Change the 80 to whatever you need.</p></div>
       <div class="field"><label for="w-notes">Coach notes <span class="opt">only coaches see these</span></label><textarea id="w-notes" rows="3" maxlength="3000">${esc(w.notes || '')}</textarea></div>
       <label class="check"><input type="checkbox" id="w-tracked" ${w.tracked ? 'checked' : ''}> Tracked: members can record a score and choose whether it goes on the leaderboard</label>
@@ -352,11 +420,23 @@ async function programmingTab() {
     const as = $('#w-pv-as').value, pbs = as === 'me' ? PBS : as === 'sample' ? SAMPLE_PBS : {}, day = $('#w-day').value;
     const draft = { id: 'preview', track_id: $('#w-track').value, day, title: $('#w-title').value.trim() || 'Session title', body: body.value.trim() || 'Your session text appears here.', tracked: $('#w-tracked').checked, score_type: $('#w-type').value, published: true };
     const okDay = /^\d{4}-\d{2}-\d{2}$/.test(day), memberTracks = TRACKS.filter((t) => t.audience !== 'coaches');
-    $('#w-prev').innerHTML = phone(progChips(memberTracks, draft.track_id, true) + workoutCard(draft, [], { asMember: true, pbs, inert: true }) + (okDay ? classList(pcls, day, [], true) : ''), okDay ? dayLabel(parseDay(day), true) : 'Training');
+    $('#w-prev').innerHTML = phone(progChips(memberTracks, draft.track_id, true) + workoutCard(draft, [], { asMember: true, pbs, inert: true }) + (okDay ? classList(staticRows(pcls, day, day), true) : ''), okDay ? dayLabel(parseDay(day), true) : 'Training');
   };
   const typeVis = () => ($('#w-type-field').hidden = !$('#w-tracked').checked);
   form.addEventListener('input', prev); form.addEventListener('change', () => { typeVis(); prev(); }); $('#w-pv-as').onchange = prev; typeVis(); prev();
-  $$('[data-tok]', form).forEach((b) => (b.onclick = () => { const s = body.selectionStart ?? body.value.length; body.setRangeText(b.dataset.tok, s, body.selectionEnd ?? s, 'end'); body.focus(); prev(); }));
+  const tokName = $('#tok-name'), tokPer = $('#tok-per'), tokAdd = $('#tok-add');
+  tokName.onchange = () => {
+    const d = DEFS.find((x) => x.name === tokName.value);
+    tokAdd.disabled = !d;
+    tokPer.hidden = !(d && d.kind === 'time' && d.distance_m);
+    if (!tokPer.hidden) tokPer.value = /row|ski|bike|erg/i.test(d.name) ? '500' : d.distance_m >= 1000 ? '1000' : '';
+  };
+  tokAdd.onclick = () => {
+    const name = tokName.value, pct = parseFloat($('#tok-pct').value); if (!name) return;
+    if (!(pct > 0 && pct <= 150)) { $('#tok-pct').focus(); return; }
+    const tok = `{${parseFloat(pct.toFixed(1))}% ${name}${!tokPer.hidden && tokPer.value ? ` /${tokPer.value}m` : ''}}`;
+    const s = body.selectionStart ?? body.value.length; body.setRangeText(tok, s, body.selectionEnd ?? s, 'end'); body.focus(); prev();
+  };
   if (editing) { $('#w-cancel').onclick = () => { EDIT = null; programmingTab(); }; if (matchMedia('(max-width:900px)').matches) form.scrollIntoView({ block: 'start' }); }
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -383,18 +463,18 @@ async function programmingTab() {
 // ---------- Book: the week as a calendar (web layout) ----------
 // On a phone this tab is not shown: the Training day view carries that day's classes instead.
 async function bookTab() {
-  const from = iso(WEEK), todayIso = iso(new Date());
-  const [cls, mine] = await Promise.all([db.classes(), db.myBookings(from)]);
-  const days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(WEEK, i)).filter((d, i) => i < 6 || cls.some((c) => c.day === 7));
-  const slot = (c, k) => { const b = mine.find((x) => x.class_id === c.id && x.day === k), past = finished(k, c.start_time);
-    return `<div class="slot ${b ? 'mine' : ''} ${past ? 'off' : ''}" data-class="${esc(c.id)}" data-day="${k}"><span class="t">${t12(c.start_time)}</span>
-      <span class="n">${esc(c.name)}${c.note ? ` <em>${esc(c.note)}</em>` : ''}</span><span class="c">${esc(c.coach || '')}</span>${b ? `<span class="st">${bookState(b)}</span>` : ''}
-      ${past ? '<span class="c">Finished</span>' : b ? '<button class="ib" data-cancel>Cancel</button>' : '<button class="btn sm" data-book>Book</button>'}</div>`; };
-  $('#pane').innerHTML = weekNav([], false) + (LINKED ? '' : `<p class="banner">${PREVIEW_NOTE}</p>`) +
-    `<div class="week cal" style="--cols:${days.length}">${days.map((d) => { const k = iso(d), rows = classesOn(cls, k);
-      return `<div class="day ${k === todayIso ? 'today' : ''}"><h3>${DAYS[(d.getDay() + 6) % 7].slice(0, 3)} ${d.getDate()}${k === todayIso ? ' · today' : ''}</h3>${rows.length ? rows.map((c) => slot(c, k)).join('') : '<p class="rest">No classes</p>'}</div>`; }).join('')}</div>`;
+  const g = GEN, from = iso(WEEK), to = iso(addDays(WEEK, 6)), todayIso = iso(new Date());
+  const tt = await timetable(from, to), note = ttNote(tt);
+  if (g !== GEN) return;
+  const days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(WEEK, i)).filter((d, i) => i < 6 || tt.rows.some((r) => r.day === iso(d)));
+  const slot = (r) => `<div class="slot ${r.mine ? 'mine' : ''} ${finished(r.day, r.start_time) ? 'off' : ''}" data-key="${esc(r.key)}"><span class="t">${t12(r.start_time)}</span>
+      <span class="n">${esc(r.name)}${r.note ? ` <em>${esc(r.note)}</em>` : ''}</span><span class="c">${esc(r.coach)}</span>${stateText(r) ? `<span class="st ${r.mine ? '' : 'plain'}">${esc(stateText(r))}</span>` : ''}
+      ${rowActions(r)}</div>`;
+  $('#pane').innerHTML = weekNav([], false) + (note ? `<p class="banner">${esc(note)}</p>` : '') +
+    `<div class="week cal" style="--cols:${days.length}">${days.map((d) => { const k = iso(d), rows = tt.rows.filter((r) => r.day === k);
+      return `<div class="day ${k === todayIso ? 'today' : ''}"><h3>${DAYS[(d.getDay() + 6) % 7].slice(0, 3)} ${d.getDate()}${k === todayIso ? ' · today' : ''}</h3>${rows.length ? rows.map(slot).join('') : '<p class="rest">No classes</p>'}</div>`; }).join('')}</div>`;
   wireWeek(bookTab);
-  wireBooking($('.cal'), mine, bookTab);
+  wireBooking($('.cal'), tt, bookTab);
 }
 
 // ---------- PBs ----------

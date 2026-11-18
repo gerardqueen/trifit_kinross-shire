@@ -71,3 +71,26 @@ results; the best is their PB, and each one shows the improvement since their fi
 the first programme; others such as HYROX show only when chosen), that day's programming, then
 that day's classes with Book buttons. On the web, the Book tab is a week calendar. On a phone
 there is no separate Book tab, because the day view already carries the classes.
+
+## The members app (iPhone, Android later)
+
+`mobile/` wraps the members page (`app.html`) with Capacitor, so the app and the website share one
+codebase. `npm run build` in `mobile/` bundles `js/app.js` (with supabase-js from npm) into `www/`.
+
+In the app (or `app.html?app` on the website) everyone, coaches and admins included, gets the
+member view: Training, PBs and Account, with a bottom tab bar. Drafts, coach notes,
+coaches-only programmes, the programming editor and admin tools stay on the website.
+Emailed links (confirm sign-up, reset password) open the members page on the website.
+
+**TestFlight via Codemagic** (`codemagic.yaml`, workflow `trifit-ios`, started by hand):
+1. App Store Connect → Apps → + → New App: name TRI FIT, bundle ID `com.trifitkinross.app`
+   (register it first under Certificates, Identifiers & Profiles → Identifiers if it is not listed).
+2. Codemagic → add this repository as a new app, and add an environment variable group
+   `app_store_connect` with the same three App Store Connect API key values as No Rule Nutrition.
+3. Start the `trifit-ios` workflow. The build appears in TestFlight once Apple has processed it.
+
+**TeamUp:** with the secret `TF_TEAMUP_TOKEN` set, a new member's account is matched to TeamUp by
+email and switched on automatically if their membership is active; classes, spaces and their
+bookings come live from TeamUp, and booking goes straight into it. Untested until the gym's token
+exists: an admin can call the function's `inspect` action to see what TeamUp returns.
+Demo: `app.html?demo=member&app&teamup` shows the app with TeamUp simulated.

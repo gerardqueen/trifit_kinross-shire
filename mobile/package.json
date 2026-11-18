@@ -1,0 +1,20 @@
+{
+  "name": "trifit-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TRI FIT Kinross-shire members app: the members page wrapped with Capacitor for iPhone (and later Android).",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "sync": "npm run build && npx cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "@supabase/supabase-js": "2.45.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "esbuild": "^0.25.0"
+  }
+}
