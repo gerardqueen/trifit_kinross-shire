@@ -26,6 +26,17 @@ workflows:
         script: cd mobile && npm ci
       - name: Build the app from the members page and sync Capacitor
         script: cd mobile && npm run build && npx cap sync ios
+      - name: Check App Store Connect values (prints no secrets)
+        script: |
+          k="$CM_BUILD_DIR/check.p8"; printf '%s\n' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$k"
+          [ "$APP_STORE_CONNECT_ISSUER_ID" = "4b2d3c5c-0fdc-4409-aece-5e797549714c" ] && echo "Issuer ID: OK" || echo "Issuer ID: WRONG (length ${#APP_STORE_CONNECT_ISSUER_ID}, expected 36)"
+          [ "$APP_STORE_CONNECT_KEY_IDENTIFIER" = "H5X256X3F7" ] && echo "Key ID: OK" || echo "Key ID: WRONG (length ${#APP_STORE_CONNECT_KEY_IDENTIFIER}, expected 10)"
+          head -1 "$k" | grep -q -- '-----BEGIN PRIVATE KEY-----' && echo "Private key: starts with BEGIN line" || echo "Private key: does NOT start with -----BEGIN PRIVATE KEY-----"
+          grep -q -- '-----END PRIVATE KEY-----' "$k" && echo "Private key: has END line" || echo "Private key: missing -----END PRIVATE KEY-----"
+          echo "Private key: $(wc -l < "$k" | tr -d ' ') lines (a .p8 is normally 6)"
+          grep -q '\\n' "$k" && echo "Private key contains literal \\n characters (should be real line breaks)" || true
+          openssl pkey -in "$k" -noout 2>/dev/null && echo "Private key: parses OK" || echo "Private key: DOES NOT PARSE"
+          rm -f "$k"
       - name: Write API key file
         script: |
           mkdir -p "$CM_BUILD_DIR/private_keys"
