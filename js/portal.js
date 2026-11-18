@@ -1,7 +1,7 @@
 // Data for the member and coach portal (app.html): who you are, programmes, workouts, scores,
 // the leaderboard, personal bests, bookings and (for admins) people. Demo mode keeps it all in
 // this browser so every screen can be tried without an account.
-import { DEMO, client, must, uid, demoRead, demoWrite } from './data.js';
+import { DEMO, client, must, uid, demoRead, demoWrite, compress } from './data.js';
 
 export { DEMO };
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -55,7 +55,7 @@ const dsave = (s) => demoWrite(s);
 let ME = null;
 /** null when signed out. Creates the profile on first sign-in. */
 export async function me(name) {
-  if (DEMO) { const p = demo().portal.me, role = DEMO_ROLE(); return (ME = { user_id: 'me', email: 'demo', name: p.name, role, status: 'active', board_default: p.board_default, is_admin: role === 'admin', demo: true }); }
+  if (DEMO) { const p = demo().portal.me, role = DEMO_ROLE(); return (ME = { user_id: 'me', email: 'demo', name: p.name, role, status: 'active', board_default: p.board_default, is_admin: role === 'admin', avatar_url: p.avatar_url || null, demo: true }); }
   const c = await client();
   const { data: { session } } = await c.auth.getSession();
   if (!session) return (ME = null);
@@ -63,10 +63,63 @@ export async function me(name) {
   return (ME = rows[0] ? { ...rows[0] } : null);
 }
 export async function updateMe(name, boardDefault) {
-  if (DEMO) { const s = demo(); s.portal.me = { name, board_default: boardDefault }; return dsave(s); }
+  if (DEMO) { const s = demo(); Object.assign(s.portal.me, { name, board_default: boardDefault }); return dsave(s); }
   const c = await client(); must(await c.rpc('tf_update_me', { p_name: name, p_board_default: boardDefault }));
 }
 const staff = () => ME && (ME.role === 'admin' || ME.role === 'coach');
+
+// ---------- Profile photo ----------
+// One photo per person, in tf-photos/avatars/<their id>/. A new photo replaces the old one.
+export async function setAvatar(file) {
+  if (DEMO) { const s = demo(); s.portal.me.avatar_url = (await compress(file, 320, 0.8)).dataUrl(); return dsave(s); }
+  const c = await client(), folder = `avatars/${ME.user_id}`, path = `${folder}/${uid()}.jpg`;
+  const { blob } = await compress(file, 512, 0.82);
+  must(await c.storage.from('tf-photos').upload(path, blob, { contentType: 'image/jpeg', cacheControl: '31536000' }));
+  must(await c.rpc('tf_set_avatar', { p_url: c.storage.from('tf-photos').getPublicUrl(path).data.publicUrl }));
+  await clearAvatars(c, folder, path);
+}
+export async function removeAvatar() {
+  if (DEMO) { const s = demo(); s.portal.me.avatar_url = null; return dsave(s); }
+  const c = await client();
+  must(await c.rpc('tf_set_avatar', { p_url: null }));
+  await clearAvatars(c, `avatars/${ME.user_id}`, null);
+}
+async function clearAvatars(c, folder, keep) {
+  const { data } = await c.storage.from('tf-photos').list(folder);
+  const old = (data || []).map((f) => `${folder}/${f.name}`).filter((p) => p !== keep);
+  if (old.length) await c.storage.from('tf-photos').remove(old);
+}
+
+// ---------- Register (coaches) ----------
+const DEMO_NAMES = ['Callum Brown', 'Eilidh Stewart', 'Ross Martin', 'Isla Kerr', 'Hamish Paterson', 'Morven Reid', 'Fraser Grant'];
+const demoPeople = (key) => DEMO_NAMES.slice(0, 3 + (key.length + key.charCodeAt(key.length - 1)) % 5);
+/** Booked counts per website class on one day: {class_id: {booked, present}}. */
+export async function registerCounts(day) {
+  if (DEMO) { const s = demo(), att = s.portal.att || {}; return Object.fromEntries(s.classes.map((c) => { const k = c.id; const ppl = demoPeople(k); return [k, { booked: ppl.length, present: ppl.filter((n) => att[`${day}|${k}|${n}`] === 'present').length }]; })); }
+  const c = await client();
+  return Object.fromEntries(must(await c.rpc('tf_register_counts', { p_day: day })).map((r) => [r.class_id, r]));
+}
+/** Who is booked into a website class (preview bookings), with any marks. */
+export async function register(classId, day) {
+  if (DEMO) { const att = demo().portal.att || {}; return demoPeople(classId).map((n) => ({ member_key: n, name: n, avatar_url: null, status: att[`${day}|${classId}|${n}`] || null })); }
+  const c = await client(); return must(await c.rpc('tf_register', { p_class: classId, p_day: day }));
+}
+/** Marks already made for one class: {member_key: status}. */
+export async function marks(day, classKey) {
+  if (DEMO) { const att = demo().portal.att || {}, pre = `${day}|${classKey}|`; return Object.fromEntries(Object.entries(att).filter(([k]) => k.startsWith(pre)).map(([k, v]) => [k.slice(pre.length), v])); }
+  const c = await client();
+  return Object.fromEntries(must(await c.from('tf_attendance').select('member_key,status').eq('day', day).eq('class_key', classKey)).map((r) => [r.member_key, r.status]));
+}
+/** status: 'present', 'absent', or null to clear the mark. */
+export async function mark(day, classKey, memberKey, name, status) {
+  if (DEMO) { const s = demo(); s.portal.att = s.portal.att || {}; const k = `${day}|${classKey}|${memberKey}`; if (status) s.portal.att[k] = status; else delete s.portal.att[k]; return dsave(s); }
+  const c = await client();
+  if (!status) return must(await c.from('tf_attendance').delete().eq('day', day).eq('class_key', classKey).eq('member_key', memberKey));
+  must(await c.from('tf_attendance').upsert({ day, class_key: classKey, member_key: memberKey, member_name: name, status, marked_by: ME.user_id, marked_at: new Date().toISOString() }, { onConflict: 'day,class_key,member_key' }));
+}
+/** Live register from TeamUp for one class. */
+export async function roster(eventId) { const r = await teamup('roster', { event_id: eventId }); if (!r.ok) throw new Error(r.error || 'TeamUp did not send the register.'); return r.people || []; }
+export const markInTeamup = (attendanceId, present) => teamup('mark', { attendance_id: attendanceId, present });
 
 // ---------- Programmes and workouts ----------
 export async function tracks() {
@@ -205,6 +258,8 @@ function demoTeamup(action, p) {
     }
     return { linked: true, ok: true, matched: true, events };
   }
+  if (action === 'roster') return { ok: true, people: demoPeople(p.event_id).map((n, i) => ({ attendance_id: 'a' + i, customer_id: 'c' + i, user_id: null, name: n, avatar_url: null, status: null, waitlist: false })) };
+  if (action === 'mark') return { ok: true };
   if (action === 'book') { s.portal.tu.push(p.event_id); dsave(s); return { ok: true }; }
   if (action === 'cancel') { s.portal.tu = s.portal.tu.filter((x) => x !== p.event_id); dsave(s); return { ok: true }; }
   return { ok: false, error: 'Unknown action.' };

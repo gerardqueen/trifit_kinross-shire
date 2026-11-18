@@ -21,6 +21,11 @@ let ME = null, TRACKS = [], PBS = {}, LINKED = false, DEFS = [], LOG = [], BENCH
 // In the app everyone, coaches and admins included, gets the member view: programming and admin
 // tools stay on the website.
 const isStaff = () => !APP && (ME.role === 'admin' || ME.role === 'coach');
+// The one coaching tool in the app as well as on the website: the class register.
+const isCoach = () => ME.role === 'admin' || ME.role === 'coach';
+const initials = (n) => String(n || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+const avatar = (url, name, cls = '') => (url ? `<img class="av ${cls}" src="${esc(url)}" alt="">` : `<span class="av ${cls}" aria-hidden="true">${esc(initials(name))}</span>`);
+const whoLine = () => (ME.demo ? '' : APP ? (ME.name || ME.email) : `${ME.name || ME.email} · ${ME.role}`);
 
 // ---------- Benchmarks and the percentage engine ----------
 // A lift percentage is a straight share of the 1 rep max, rounded to the nearest 2.5kg.
@@ -95,12 +100,12 @@ async function boot() {
   $('#site-link').hidden = APP || ME.role !== 'admin'; if (ME.demo) $('#site-link').href = 'admin.html?demo';
   $('#demo-banner').hidden = !ME.demo;
   if (ME.demo) $('#demo-banner').innerHTML = `Demo mode: you are looking at the ${esc(ME.role)} view. Nothing is saved outside this browser. Switch to ${['member', 'coach', 'admin'].filter((r) => r !== ME.role).map((r) => `<a href="?demo=${r}">${r}</a>`).join(' or ')}.`;
-  $('#who').textContent = ME.demo ? '' : APP ? (ME.name || ME.email) : `${ME.name || ME.email} · ${ME.role}`;
+  $('#who').textContent = whoLine();
   if (APP) $('.head .brand')?.removeAttribute('href');
   [TRACKS] = await Promise.all([db.tracks(), loadBench()]);
   db.teamup('status').then((r) => {
     LINKED = !!r.linked;
-    if (['training', 'book', 'account'].includes(TAB)) openTab(TAB);
+    if (['training', 'book', 'account', 'register'].includes(TAB)) openTab(TAB);
     // Keep the membership shown on the Account tab fresh: check TeamUp once a day.
     if (LINKED && !ME.demo && (!ME.teamup_checked_at || Date.now() - new Date(ME.teamup_checked_at).getTime() > 864e5))
       db.teamup('sync').then(() => db.me()).then((m) => { if (m) ME = m; }).catch(() => {});
@@ -192,7 +197,9 @@ $('#reset-form').addEventListener('submit', async (e) => {
 // ---------- Tabs ----------
 let TAB = 'training', WEEK = monday(), DAY = iso(new Date()), EDIT = null, PENDING = 0;
 function tabList() {
-  const t = [['training', 'Training'], ...(APP ? [] : [['book', 'Book']]), ['pbs', 'PBs']];
+  const t = [['training', 'Training'], ...(APP ? [] : [['book', 'Book']])];
+  if (isCoach()) t.push(['register', 'Register']);
+  t.push(['pbs', 'PBs']);
   if (isStaff()) t.push(['programming', 'Programming']);
   if (!APP && ME.role === 'admin') t.push(['people', 'People'], ['programmes', 'Programmes']);
   t.push(['account', 'Account']);
@@ -211,9 +218,9 @@ async function openTab(k) {
   TAB = k; drawTabs();
   $('#hello').textContent = Object.fromEntries(tabList())[k];
   const pane = $('#pane'); if (!pane.children.length) pane.innerHTML = '<p class="hint">Loading…</p>';
-  try { await ({ training: trainingTab, book: bookTab, pbs: pbsTab, programming: programmingTab, people: peopleTab, programmes: programmesTab, account: accountTab }[k])(); }
+  try { await ({ training: trainingTab, book: bookTab, pbs: pbsTab, programming: programmingTab, people: peopleTab, programmes: programmesTab, account: accountTab, register: registerTab }[k])(); }
   catch (e) { pane.innerHTML = `<p class="error">${esc(nice(e.message))}</p>`; }
-  if (ME.role === 'admin' && k !== 'people') db.people().then((p) => { PENDING = p.filter((x) => x.status === 'pending').length; drawTabs(); }).catch(() => {});
+  if (!APP && ME.role === 'admin' && k !== 'people') db.people().then((p) => { PENDING = p.filter((x) => x.status === 'pending').length; drawTabs(); }).catch(() => {});
 }
 function armed(btn) {
   if (btn.classList.contains('armed')) return true;
@@ -561,9 +568,74 @@ async function pbsTab() {
   }
 }
 
+// ---------- Register (coaches and admins, in the app and on the website) ----------
+// Pick a day and a class, then tick who turned up. Marks are saved here; once TeamUp is linked
+// the bookings come from TeamUp and each mark is also sent to TeamUp.
+let REGSEL = null;
+async function registerTab() {
+  inWeek();
+  const g = GEN, from = iso(WEEK), to = iso(addDays(WEEK, 6));
+  const tt = await timetable(from, to); if (g !== GEN) return;
+  const rows = tt.rows.filter((r) => r.day === DAY), sel = rows.find((r) => r.key === REGSEL);
+  if (sel) return registerList(sel, tt, g);
+  REGSEL = null;
+  const counts = tt.live ? {} : await db.registerCounts(DAY).catch(() => ({})); if (g !== GEN) return;
+  const line = (r) => { const c = tt.live ? { booked: r.booked } : counts[r.cls] || { booked: 0, present: 0 };
+    return [r.coach, c.booked != null ? `${c.booked} booked` : '', c.present ? `${c.present} present` : ''].filter(Boolean).join(' · '); };
+  $('#pane').innerHTML = `${weekNav(tt.rows)}<h3 class="dayhead">${dayLabel(parseDay(DAY), true)}</h3>
+    ${tt.live ? '' : '<p class="hint">TeamUp is not linked yet, so these are the preview bookings made in the app.</p>'}
+    <div class="rows classlist">${rows.length ? rows.map((r) => `<button type="button" class="rw cl reg" data-reg="${esc(r.key)}"><span class="cltime">${t12(r.start_time)}</span>
+      <div class="txt"><b>${esc(r.name)}</b><span>${esc(line(r))}</span></div><span class="chev" aria-hidden="true">›</span></button>`).join('') : '<p class="hint">No classes on this day.</p>'}</div>`;
+  wireWeek(registerTab);
+  $('.classlist').onclick = (e) => { const b = e.target.closest('[data-reg]'); if (b) { REGSEL = b.dataset.reg; GEN++; registerTab(); } };
+}
+async function registerList(r, tt, g) {
+  // Saved against the website class id for previews, or 'e' + the TeamUp event id when live.
+  const ck = r.event ? r.key : r.cls;
+  $('#pane').innerHTML = '<p class="hint">Loading the register…</p>';
+  let people = [], warn = '';
+  try {
+    if (r.event) {
+      const [live, local] = await Promise.all([db.roster(r.event), db.marks(r.day, ck)]);
+      people = live.map((p) => { const key = p.user_id || 'tu:' + p.customer_id; return { ...p, key, status: local[key] ?? p.status }; });
+    } else people = (await db.register(r.cls, r.day)).map((p) => ({ ...p, key: p.member_key }));
+  } catch (ex) { warn = nice(ex.message); }
+  if (g !== GEN) return;
+  const draw = () => {
+    const booked = people.filter((p) => !p.waitlist), here = booked.filter((p) => p.status === 'present').length;
+    $('#pane').innerHTML = `<div class="weeknav"><button class="ib" id="rg-back">‹ Classes</button><b>${esc(r.name)} · ${t12(r.start_time)}</b></div>
+      <h3 class="dayhead">${dayLabel(parseDay(r.day), true)}</h3>
+      ${warn ? `<p class="error">${esc(warn)}</p>` : `<p class="regsum"><b>${here}</b> of ${booked.length} present${booked.length ? '' : ' · nobody is booked in yet'}</p>`}
+      ${booked.some((p) => !p.status) ? '<div class="formrow"><button class="btn ghost sm" id="rg-all">Mark everyone not yet marked as present</button></div>' : ''}
+      <div class="rows reglist">${people.map((p) => `<div class="rw person" data-k="${esc(p.key)}">${avatar(p.avatar_url, p.name)}
+        <div class="txt"><b>${esc(p.name)}</b>${p.waitlist ? '<span>On the waitlist</span>' : ''}</div>
+        <div class="acts seg"><button type="button" data-st="present" aria-pressed="${p.status === 'present'}">Present</button><button type="button" data-st="absent" aria-pressed="${p.status === 'absent'}">Absent</button></div></div>`).join('')}</div>`;
+    $('#rg-back').onclick = () => { REGSEL = null; GEN++; registerTab(); };
+    $('#rg-all')?.addEventListener('click', async () => { for (const p of people.filter((x) => !x.waitlist && !x.status)) await set(p, 'present'); draw(); });
+    $('.reglist').onclick = async (e) => {
+      const b = e.target.closest('[data-st]'), rw = e.target.closest('[data-k]'); if (!b || !rw) return;
+      const p = people.find((x) => x.key === rw.dataset.k); await set(p, p.status === b.dataset.st ? null : b.dataset.st); draw();
+    };
+  };
+  let teamupWarned = false;
+  const set = async (p, status) => {
+    try { await db.mark(r.day, ck, p.key, p.name, status); p.status = status; }
+    catch (ex) { return flash(nice(ex.message)); }
+    if (r.event && p.attendance_id && status) {
+      const res = await db.markInTeamup(p.attendance_id, status === 'present');
+      if (!res.ok && !teamupWarned) { teamupWarned = true; flash(`Saved here, but TeamUp did not take the mark${res.error ? ` (${res.error})` : ''}.`); }
+    }
+  };
+  draw();
+}
+
 // ---------- Account ----------
 async function accountTab() {
   $('#pane').innerHTML = `<form class="panel" id="acc-form" novalidate style="max-width:560px">
+    <div class="avrow">${avatar(ME.avatar_url, ME.name || ME.email, 'lg')}
+      <div><b>Profile photo</b><p class="hint">Helps the coaches put a face to the name on the class register.</p>
+      <div class="formrow"><label class="btn ghost sm" for="a-photo">${ME.avatar_url ? 'Change photo' : 'Add a photo'}</label><input type="file" id="a-photo" accept="image/*" hidden>
+      ${ME.avatar_url ? '<button class="ib" type="button" id="a-nophoto">Remove</button>' : ''}</div></div></div>
     <div class="field"><label for="a-name">Name shown on the leaderboard</label><input id="a-name" maxlength="80" value="${esc(ME.name || '')}"></div>
     <label class="check"><input type="checkbox" id="a-board" ${ME.board_default ? 'checked' : ''}> Tick "show on the leaderboard" for me by default</label>
     <p class="hint">You still choose each time you log a score. Unticked scores stay private to you.</p>
@@ -572,7 +644,14 @@ async function accountTab() {
     <p>${ME.teamup_plan ? `${esc(ME.teamup_plan)}${ME.teamup_status ? ` · ${esc(ME.teamup_status)}` : ''}` : LINKED ? 'Not checked yet.' : 'TeamUp is not linked to this site yet, so your membership is not shown here.'}</p>
     ${LINKED ? '<div class="formrow"><button class="btn ghost sm" type="button" id="a-sync">Check my TeamUp membership</button></div>' : ''}
     <p class="hint">Signed in as ${esc(ME.email)}.</p></form>`;
-  $('#acc-form').onsubmit = async (e) => { e.preventDefault(); try { await db.updateMe($('#a-name').value.trim(), $('#a-board').checked); ME = await db.me(); $('#who').textContent = ME.demo ? '' : `${ME.name || ME.email} · ${ME.role}`; flash('Saved.'); } catch (ex) { flash(nice(ex.message)); } };
+  $('#acc-form').onsubmit = async (e) => { e.preventDefault(); try { await db.updateMe($('#a-name').value.trim(), $('#a-board').checked); ME = await db.me(); $('#who').textContent = whoLine(); flash('Saved.'); } catch (ex) { flash(nice(ex.message)); } };
+  $('#a-photo').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!/^image\//.test(f.type) && !/\.(jpe?g|png|heic|heif|webp)$/i.test(f.name)) return flash('Please choose a photo.');
+    flash('Uploading your photo…');
+    try { await db.setAvatar(f); ME = await db.me(); flash('Photo saved.'); accountTab(); } catch (ex) { flash(nice(ex.message)); }
+  };
+  $('#a-nophoto')?.addEventListener('click', async (e) => { if (!armed(e.target)) return; try { await db.removeAvatar(); ME = await db.me(); flash('Photo removed.'); accountTab(); } catch (ex) { flash(nice(ex.message)); } });
   $('#a-sync')?.addEventListener('click', async (e) => { e.target.disabled = true; const r = await db.teamup('sync'); ME = await db.me(); flash(r.message || (r.active ? 'Membership found.' : 'No active membership found for this email.')); accountTab(); });
 }
 

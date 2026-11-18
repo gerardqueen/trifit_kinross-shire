@@ -94,3 +94,11 @@ email and switched on automatically if their membership is active; classes, spac
 bookings come live from TeamUp, and booking goes straight into it. Untested until the gym's token
 exists: an admin can call the function's `inspect` action to see what TeamUp returns.
 Demo: `app.html?demo=member&app&teamup` shows the app with TeamUp simulated.
+
+## Class register and profile photos
+
+- Coaches and admins get a **Register** tab, in the app and on the website. Pick a day and a class, see who is booked in (with their photo) and mark each person Present or Absent. "Mark everyone not yet marked as present" does the lot in one tap.
+- Before TeamUp is linked the list comes from the preview bookings made in the app. Once TeamUp is linked it comes live from TeamUp (`tf-teamup` action `roster`), and each mark is also sent to TeamUp (`mark`, best effort: untested until there is a token). Marks are always saved in `tf_attendance`.
+- In the app a coach sees the member view plus the Register only. Programming, people, programmes and website content stay on the website login.
+- Everyone can add a profile photo on the Account tab. It is shrunk to 512px and stored in `tf-photos/avatars/<user id>/`; a new photo replaces the old one.
+- Database: run `supabase/004_register_avatars.sql` (done on trifit-kinross).

@@ -17,6 +17,9 @@
 //   timetable  → { from, to } live classes with spaces, and whether this member is booked
 //   book       → { event_id } registers them for that TeamUp class
 //   cancel     → { event_id } unregisters them
+//   roster     → coaches: { event_id } who is booked into a class, with any account photo here
+//   mark       → coaches: { attendance_id, present } marks attendance in TeamUp (best effort; the
+//                register is also saved in tf_attendance either way)
 //   inspect    → admins only: raw samples of what TeamUp returns, to check the field mapping
 //
 // NOT YET TESTED AGAINST LIVE TEAMUP: there was no token to test with. Paths follow TeamUp's v2
@@ -182,6 +185,37 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    const isCoach = isAdmin || (profile.role === 'coach' && profile.status === 'active');
+    if (action === 'roster') {
+      if (!isCoach) return json({ ok: false, error: 'Coaches only.' }, 403);
+      const ev = String(body.event_id ?? '');
+      if (!isRef(ev)) return json({ ok: false, error: 'Missing class.' });
+      const att = (await pages(`/api/v2/attendances?event=${encodeURIComponent(ev)}&page_size=100`, 3))
+        .filter((a: any) => (a.event == null && a.event_id == null) || String(idOf(first(a.event, a.event_id))) === ev)
+        .filter((a: any) => !/cancel|removed|declin|refund/i.test(String(a.status ?? '')));
+      // Names may come inline or only as a customer id; look up the ones that are missing.
+      const people = await Promise.all(att.map(async (a: any) => {
+        const cust = a.customer, cid = String(idOf(first(cust, a.customer_id)) ?? '');
+        let name = personName(cust), email = typeof cust === 'object' && cust ? String(cust.email ?? '') : '';
+        if (!name && cid) { try { const c = await tu(`/api/v2/customers/${encodeURIComponent(cid)}`); name = personName(c); email = String(c?.email ?? ''); } catch { /* keep going */ } }
+        const st = String(a.status ?? '');
+        return { attendance_id: String(a.id ?? ''), customer_id: cid, name: name || 'Member', email, waitlist: /wait/i.test(st),
+          status: /attend|present|check/i.test(st) ? 'present' : /no.?show|absent/i.test(st) ? 'absent' : null };
+      }));
+      const ids = people.map((p) => p.customer_id).filter(Boolean);
+      const { data: here } = ids.length ? await db.from('tf_profiles').select('user_id, teamup_id, name, avatar_url').in('teamup_id', ids) : { data: [] };
+      const byTu = new Map((here ?? []).map((r: any) => [String(r.teamup_id), r]));
+      return json({ ok: true, people: people.map((p) => { const h: any = byTu.get(p.customer_id); return { ...p, user_id: h?.user_id ?? null, avatar_url: h?.avatar_url ?? null, name: h?.name || p.name }; })
+        .sort((a, b) => Number(a.waitlist) - Number(b.waitlist) || a.name.localeCompare(b.name)) });
+    }
+    if (action === 'mark') {
+      if (!isCoach) return json({ ok: false, error: 'Coaches only.' }, 403);
+      const id = String(body.attendance_id ?? '');
+      if (!isRef(id)) return json({ ok: false, error: 'Missing booking.' });
+      await tu(`/api/v2/attendances/${id}`, { method: 'PATCH', body: { status: body.present ? 'attended' : 'noshow' } });
+      return json({ ok: true });
+    }
+
     if (action === 'inspect') {
       if (!isAdmin) return json({ ok: false, error: 'Admins only.' }, 403);
       const cut = (v: unknown) => JSON.stringify(v ?? null).slice(0, 2500);
@@ -195,6 +229,7 @@ Deno.serve(async (req) => {
         await tryIt('attendance', async () => results(await tu(`/api/v2/attendances?customer=${cid}&page_size=2`))[0]);
         await tryIt('membership', async () => (await memberships(cid!))[0]);
       }
+      await tryIt('event_attendance', async () => { const e = results(await tu(`/api/v2/events?start_date=${today}&starts_after=${today}T00:00:00Z&page_size=1`))[0]; return e ? results(await tu(`/api/v2/attendances?event=${e.id}&page_size=2`))[0] : null; });
       return json({ ok: true, inspect: out });
     }
     return json({ ok: false, error: 'Unknown action.' }, 400);

@@ -20,7 +20,7 @@ workflows:
         BUNDLE_ID: "com.trifitkinross.app"
         MARKETING_VERSION: "1.0.0"
       node: 22
-      xcode: latest
+      xcode: "27.2"
     scripts:
       - name: Install npm dependencies
         script: cd mobile && npm ci

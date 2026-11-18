@@ -378,3 +378,22 @@ textarea{resize:vertical;line-height:1.5}
 .appmode .login{margin-top:12px}
 /* long coach names and states shrink with an ellipsis instead of widening the page */
 .rows,.stackcol{grid-template-columns:minmax(0,1fr)}
+
+/* Profile photos and the class register */
+.av{width:40px;height:40px;border-radius:50%;flex:none;object-fit:cover;background:#2a2a2e;border:1px solid var(--line);display:inline-grid;place-items:center;font:700 14px/1 var(--cond);letter-spacing:.5px;color:var(--mute)}
+.av.lg{width:84px;height:84px;font-size:26px}
+.avrow{display:flex;gap:16px;align-items:center}
+.avrow .formrow{margin-top:6px}
+button.rw{width:100%;text-align:left;color:var(--text);font:inherit;cursor:pointer}
+.rw.reg .chev{font-size:24px;line-height:1;color:var(--mute)}
+.regsum{font-size:17px;color:var(--mute)}
+.regsum b{color:var(--text);font-size:22px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:10px 12px;font:600 14px/1 var(--cond);letter-spacing:1px;text-transform:uppercase;color:var(--mute)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg [data-st="present"][aria-pressed="true"]{background:var(--ok);color:#06140c}
+.seg [data-st="absent"][aria-pressed="true"]{background:var(--stop);color:#1a0703}
+.reglist .rw.person{flex-wrap:nowrap}
+.reglist .rw .acts{width:auto}
+.reglist .rw .txt b{white-space:normal;overflow-wrap:anywhere;line-height:1.25}
+@media (max-width:520px){.reglist .rw{gap:10px;padding:9px 10px}.reglist .av{width:34px;height:34px;font-size:12px}.seg button{padding:10px 8px;font-size:13px;letter-spacing:.6px}.avrow .formrow{flex-wrap:wrap}}

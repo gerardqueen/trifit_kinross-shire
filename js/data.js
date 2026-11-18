@@ -147,7 +147,7 @@ export async function saveSettings(value) {
 }
 
 // ---------- Admin: photos ----------
-async function compress(file, maxSide, q = 0.84) {
+export async function compress(file, maxSide, q = 0.84) {
   let img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
   if (!img) img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('That file is not an image we can read.')); i.src = URL.createObjectURL(file); });
   const s = Math.min(1, maxSide / Math.max(img.width, img.height));

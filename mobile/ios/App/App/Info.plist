@@ -66,6 +66,10 @@
 	<false/>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleLightContent</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a profile photo so the coaches can put a face to your name.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a profile photo so the coaches can put a face to your name.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
