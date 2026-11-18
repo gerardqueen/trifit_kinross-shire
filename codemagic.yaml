@@ -45,8 +45,14 @@ workflows:
         script: |
           set -euo pipefail
           keychain initialize
-          openssl genrsa -out /tmp/cert_private_key.pem 2048
-          export CERTIFICATE_PRIVATE_KEY="$(cat /tmp/cert_private_key.pem)"
+          # Reuse one distribution certificate: Apple allows very few, so a new one per build
+          # soon fails with 409. CERTIFICATE_PRIVATE_KEY (secret, group app_store_connect) is the
+          # RSA key that certificate was made with; the first build creates it, later builds find it.
+          if [ -z "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
+            echo "CERTIFICATE_PRIVATE_KEY is not set: making a one-off key (this will hit Apple's certificate limit)."
+            openssl genrsa -out /tmp/cert_private_key.pem 2048
+            export CERTIFICATE_PRIVATE_KEY="$(cat /tmp/cert_private_key.pem)"
+          fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
           keychain add-certificates
           xcode-project use-profiles --project "$XCODE_PROJECT"
