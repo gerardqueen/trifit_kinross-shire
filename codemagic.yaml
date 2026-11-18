@@ -32,6 +32,7 @@ workflows:
           echo "$APP_STORE_CONNECT_PRIVATE_KEY" > "$CM_BUILD_DIR/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_IDENTIFIER}.p8"
       - name: Set up code signing
         script: |
+          set -euo pipefail
           keychain initialize
           openssl genrsa -out /tmp/cert_private_key.pem 2048
           export CERTIFICATE_PRIVATE_KEY="$(cat /tmp/cert_private_key.pem)"
